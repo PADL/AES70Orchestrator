@@ -53,7 +53,12 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
   ) }
 
   let profileIndex: OcaONo
+  nonisolated let schemaName: String
   weak var coordinator: OcaCoordinator?
+
+  override public nonisolated var description: String {
+    "OcaProfile(oNo: \(objectNumber), index: \(profileIndex), schema: \(schemaName), role: \(role))"
+  }
 
   @OcaDeviceProperty(
     propertyID: OcaPropertyID("3.1"),
@@ -72,6 +77,9 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
   // maps device identifier to its allocated device index (not exposed via OCA)
   var deviceIndices = [SwiftOCA.OcaConnectionBroker.DeviceIdentifier: OcaONo]()
 
+  // the proxy block in the "Profile Proxies" hierarchy for this profile's local objects
+  var proxyBlock: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>?
+
   // maps local device object numbers to their bindings for efficient event dispatch
   private var objectBindings = [OcaONo: any OcaObjectBindingRepresentable]()
 
@@ -87,8 +95,19 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     objectBindings.removeValue(forKey: oNo)
   }
 
+  func remoteObjectCount(
+    for deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
+  ) -> Int {
+    objectBindings.values.filter { binding in
+      binding.hasRemoteObject(for: deviceIdentifier)
+    }.count
+  }
+
   func handleLocalEvent(_ event: OcaEvent, parameters: Data) async {
     if let binding = objectBindings[event.emitterONo] {
+      coordinator?.logger.debug(
+        "handleLocalEvent: \(self) matched binding for ONo \(event.emitterONo)"
+      )
       await binding.handleLocalEvent(event, parameters: parameters)
     }
   }
@@ -102,12 +121,19 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     }
   }
 
-  init(role: UUID, schema: String, coordinator: OcaCoordinator) async throws {
-    profileIndex = try coordinator.allocateProfileIndex()
+  init(
+    role: UUID,
+    objectNumber: OcaONo,
+    profileIndex: OcaONo,
+    schema: String,
+    coordinator: OcaCoordinator
+  ) async throws {
+    self.profileIndex = profileIndex
+    schemaName = schema
     self.coordinator = coordinator
     self.schema = schema
     try await super.init(
-      objectNumber: ProfilesONoRange.lowerBound + profileIndex,
+      objectNumber: objectNumber,
       role: role.description,
       deviceDelegate: coordinator.device,
       addToRootBlock: false
@@ -119,7 +145,9 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
   }
 
   @OcaDevice
-  func createLocalObjects() async throws {
+  func createLocalObjects(
+    proxyBlock: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>
+  ) async throws {
     guard let coordinator else { throw Ocp1Error.status(.deviceError) }
     let schema = try profileSchema
 
@@ -140,6 +168,8 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
         if let parentRolePath {
           let parentBlock = blocks[parentRolePath]!
           try await parentBlock._add(actionObject: object)
+        } else {
+          try await proxyBlock.add(actionObject: object)
         }
         addObjectBinding(OcaObjectBinding<SwiftOCADevice.OcaRoot, SwiftOCA.OcaRoot>(
           localObject: object,
@@ -167,9 +197,10 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     lockable: OcaBoolean = true,
     role: OcaString? = nil,
     deviceDelegate: OcaDevice? = nil,
-    addToRootBlock: Bool = true
+    addToRootBlock: Bool = false
   ) async throws {
     profileIndex = 0
+    schemaName = ""
     try await super.init(
       objectNumber: objectNumber,
       lockable: lockable,

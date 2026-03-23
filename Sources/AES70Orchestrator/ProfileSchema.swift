@@ -17,9 +17,14 @@
 import SwiftOCA
 import SwiftOCADevice
 
-public struct OcaONoMask: Sendable, Equatable {
+public struct OcaONoMask: Sendable, Equatable, CustomStringConvertible {
   public let oNo: OcaONo
   public let mask: OcaONo
+
+  public init(oNo: OcaONo, mask: OcaONo) {
+    self.oNo = oNo
+    self.mask = mask
+  }
 
   public var instanceCount: Int {
     guard mask != 0 else { return 0 }
@@ -27,6 +32,10 @@ public struct OcaONoMask: Sendable, Equatable {
     let onesCount = (~shifted).trailingZeroBitCount
     assert(shifted == (1 << onesCount) &- 1, "mask bits must be contiguous")
     return onesCount
+  }
+
+  public var description: String {
+    "0x\(String(oNo, radix: 16))/0x\(String(mask, radix: 16))"
   }
 
   func objectNumber(for index: OcaONo) throws -> OcaONo {
@@ -37,14 +46,11 @@ public struct OcaONoMask: Sendable, Equatable {
   }
 }
 
-public struct OccProfileObjectSchema: Sendable {
+public struct OcaProfileObjectSchema: Sendable, CustomStringConvertible {
   public let role: String
 
   // the OCA class ID for the profile entry
   public let type: SwiftOCADevice.OcaRoot.Type
-
-  // the optional global type identifier
-  public let globalType: OcaGlobalTypeIdentifier?
 
   // the local number(s). the bits set in the mask determine which bits are free for numbering
   // instances of the object. if optional, then they are allocated by the
@@ -53,7 +59,8 @@ public struct OccProfileObjectSchema: Sendable {
 
   // the number of instances that can be instantiated locally
   public var localInstanceCount: Int {
-    localObjectNumber?.instanceCount ?? 0
+    guard let localObjectNumber else { return 0 }
+    return 1 << localObjectNumber.instanceCount
   }
 
   // the remote object number(s). the bits set in the mask determine how many profiles can be bound
@@ -61,7 +68,7 @@ public struct OccProfileObjectSchema: Sendable {
   public let remoteObjectNumber: OcaONoMask
 
   public var remoteObjectCount: Int {
-    remoteObjectNumber.instanceCount
+    1 << remoteObjectNumber.instanceCount
   }
 
   public var isContainer: Bool {
@@ -72,6 +79,25 @@ public struct OccProfileObjectSchema: Sendable {
   public var isLeaf: Bool { !isContainer }
 
   public let actionObjectSchema: [Self]
+
+  public var description: String {
+    let children = actionObjectSchema.isEmpty ? "" : ", children: \(actionObjectSchema.count)"
+    return "OcaProfileObjectSchema(role: \(role), type: \(type), remote: \(remoteObjectNumber)\(children))"
+  }
+
+  public init(
+    role: String,
+    type: SwiftOCADevice.OcaRoot.Type,
+    localObjectNumber: OcaONoMask? = nil,
+    remoteObjectNumber: OcaONoMask,
+    actionObjectSchema: [Self] = []
+  ) {
+    self.role = role
+    self.type = type
+    self.localObjectNumber = localObjectNumber
+    self.remoteObjectNumber = remoteObjectNumber
+    self.actionObjectSchema = actionObjectSchema
+  }
 
   func createLocalObject(
     objectNumber: OcaONo? = nil,
@@ -88,7 +114,7 @@ public struct OccProfileObjectSchema: Sendable {
   func applyRecursive(
     parentRolePath: [String] = [],
     _ body: (
-      _ schema: OccProfileObjectSchema,
+      _ schema: OcaProfileObjectSchema,
       _ rolePath: [String],
       _ parentRolePath: [String]?
     ) async throws -> ()
@@ -102,11 +128,15 @@ public struct OccProfileObjectSchema: Sendable {
   }
 }
 
-public final class OcaProfileSchema: Sendable {
+public final class OcaProfileSchema: Sendable, CustomStringConvertible {
   public let name: String
-  public let blocks: [OccProfileObjectSchema]
+  public let blocks: [OcaProfileObjectSchema]
 
-  public init(name: String, blocks: [OccProfileObjectSchema]) {
+  public var description: String {
+    "OcaProfileSchema(name: \(name), blocks: \(blocks.count))"
+  }
+
+  public init(name: String, blocks: [OcaProfileObjectSchema]) {
     self.name = name
     self.blocks = blocks
   }

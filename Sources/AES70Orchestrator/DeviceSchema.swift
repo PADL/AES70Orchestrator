@@ -16,10 +16,24 @@
 
 import SwiftOCA
 
-public struct OcaDeviceSchema: Sendable {
+public struct OcaDeviceSchema: Sendable, CustomStringConvertible {
   public let name: String
 
   public let models: [OcaModelGUID]?
 
   public let profileSchemas: [OcaProfileSchema]
+
+  public var description: String {
+    "OcaDeviceSchema(name: \(name), schemas: \(profileSchemas.map(\.name)))"
+  }
+
+  public init(
+    name: String,
+    models: [OcaModelGUID]? = nil,
+    profileSchemas: [OcaProfileSchema]
+  ) {
+    self.name = name
+    self.models = models
+    self.profileSchemas = profileSchemas
+  }
 }

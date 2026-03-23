@@ -19,6 +19,7 @@ import FoundationEssentials
 #else
 import Foundation
 #endif
+import Logging
 import SwiftOCA
 import SwiftOCADevice
 
@@ -27,9 +28,10 @@ let PADLCompanyID = OcaOrganizationID((0x0A, 0xE9, 0x1B))
 public let OcaCoordinatorONo = OcaONo(1024)
 // FIXME: in order to not conflict with device ONo space we are going to use the reserved ONos
 let ProfilesContainerONo = OcaONo(1025)
+let ProfileProxiesContainerONo = OcaONo(1026)
+// per-schema blocks start at ProfileProxiesContainerONo + 1, with 2 blocks per schema
+// (one for profiles, one for proxies), so the profile ONo range starts after those
 let MaxProfiles = OcaONo(100)
-let ProfilesONoRange: Range<OcaONo> = ProfilesContainerONo +
-  1..<(ProfilesContainerONo + MaxProfiles)
 
 public enum OcaCoordinatorError: Error {
   case profileONoAllocationExhausted
@@ -56,6 +58,7 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
 
   let connectionBroker: SwiftOCA.OcaConnectionBroker
   let deviceSchema: OcaDeviceSchema
+  nonisolated let logger: Logger
 
   @OcaDeviceProperty(
     propertyID: OcaPropertyID("3.1"),
@@ -63,53 +66,137 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
   )
   public var currentDeviceIdentifiers = [OcaString]()
 
-  // profiles are conatined in blocks but we should also be able to look them up by UUID or name
-  var profiles: SwiftOCADevice.OcaBlock<OcaProfile>
-  private var nextProfileIndex: OcaONo = 0
-  private var _deviceIndices = [SwiftOCA.OcaConnectionBroker.DeviceIdentifier: Set<OcaONo>]()
+  @OcaDevice
+  final class _SchemaEntry {
+    let profiles: SwiftOCADevice.OcaBlock<OcaProfile>
+    let proxies: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>
+    var nextProfileIndex: OcaONo = 0
+    var deviceIndices = [SwiftOCA.OcaConnectionBroker.DeviceIdentifier: Set<OcaONo>]()
+
+    init(
+      profiles: SwiftOCADevice.OcaBlock<OcaProfile>,
+      proxies: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>
+    ) {
+      self.profiles = profiles
+      self.proxies = proxies
+    }
+
+    func allocateProfileIndex() -> OcaONo {
+      let index = nextProfileIndex
+      nextProfileIndex += 1
+      return index
+    }
+  }
+
+  let _profilesBlock: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>
+  let _profileProxiesBlock: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>
+  private var _schemaEntries = [String: _SchemaEntry]()
+  private var _nextProfileONo: OcaONo = 0
   private var _brokerEventTask: Task<(), Never>?
 
-  func allocateProfileIndex() throws -> OcaONo {
-    let index = nextProfileIndex
-    let oNo = ProfilesONoRange.lowerBound + index
-    guard ProfilesONoRange.contains(oNo) else {
+  private func _schemaEntry(for schemaName: String) throws -> _SchemaEntry {
+    guard let entry = _schemaEntries[schemaName] else {
+      throw OcaCoordinatorError.profileSchemaNotFound
+    }
+    return entry
+  }
+
+  private var _profileONoLimit: OcaONo {
+    _profileONoBase + MaxProfiles
+  }
+
+  private var _profileONoBase: OcaONo = 0
+
+  func allocateProfileONo() throws -> OcaONo {
+    let oNo = _nextProfileONo
+    guard oNo < _profileONoLimit else {
       throw OcaCoordinatorError.profileONoAllocationExhausted
     }
-    nextProfileIndex += 1
-    return index
+    _nextProfileONo += 1
+    return oNo
   }
 
   @OcaDevice
   public init(
     connectionBroker: SwiftOCA.OcaConnectionBroker,
-    deviceSchema: OcaDeviceSchema
+    deviceSchema: OcaDeviceSchema,
+    deviceDelegate: OcaDevice? = nil,
+    logger: Logger = Logger(label: "com.padl.AES70Orchestrator")
   ) async throws {
     self.deviceSchema = deviceSchema
     self.connectionBroker = connectionBroker
-    try await profiles = .init(
+    self.logger = logger
+    _profilesBlock = try await .init(
       objectNumber: ProfilesContainerONo,
       lockable: false,
-      role: "Profiles"
+      role: "Profiles",
+      deviceDelegate: deviceDelegate,
+      addToRootBlock: true
+    )
+    _profileProxiesBlock = try await .init(
+      objectNumber: ProfileProxiesContainerONo,
+      lockable: false,
+      role: "Profile Proxies",
+      deviceDelegate: deviceDelegate,
+      addToRootBlock: true
     )
     try await super.init(
       objectNumber: OcaCoordinatorONo,
-      role: "Profile Manager"
+      role: "Profile Manager",
+      deviceDelegate: deviceDelegate
     )
-    try await device.setEventDelegate(self)
+    let device = try device
+    let schemaCount = OcaONo(deviceSchema.profileSchemas.count)
+    for (index, schema) in deviceSchema.profileSchemas.enumerated() {
+      let profilesONo = ProfileProxiesContainerONo + 1 + OcaONo(index)
+      let proxiesONo = ProfileProxiesContainerONo + 1 + schemaCount + OcaONo(index)
+      let profilesBlock = try await SwiftOCADevice.OcaBlock<OcaProfile>(
+        objectNumber: profilesONo,
+        lockable: false,
+        role: schema.name,
+        deviceDelegate: device,
+        addToRootBlock: false
+      )
+      let proxiesBlock = try await SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>(
+        objectNumber: proxiesONo,
+        lockable: false,
+        role: schema.name,
+        deviceDelegate: device,
+        addToRootBlock: false
+      )
+      try await _profilesBlock.add(actionObject: profilesBlock)
+      try await _profileProxiesBlock.add(actionObject: proxiesBlock)
+      _schemaEntries[schema.name] = _SchemaEntry(
+        profiles: profilesBlock,
+        proxies: proxiesBlock
+      )
+    }
+    let baseONo = ProfileProxiesContainerONo + 1 + schemaCount * 2
+    _profileONoBase = baseONo
+    _nextProfileONo = baseONo
+    await device.setEventDelegate(self)
+    logger.debug("Coordinator initialized with schemas: \(deviceSchema.profileSchemas.map(\.name))")
   }
 
   @OcaDevice
   public convenience init(
     connectionOptions: Ocp1ConnectionOptions = .init(),
     serviceTypes: Set<OcaNetworkAdvertisingServiceType>? = nil,
-    deviceSchema: OcaDeviceSchema
+    deviceSchema: OcaDeviceSchema,
+    deviceDelegate: OcaDevice? = nil,
+    logger: Logger = Logger(label: "com.padl.AES70Orchestrator")
   ) async throws {
     let broker = await OcaConnectionBroker(
       connectionOptions: connectionOptions,
       serviceTypes: serviceTypes,
       deviceModels: deviceSchema.models
     )
-    try await self.init(connectionBroker: broker, deviceSchema: deviceSchema)
+    try await self.init(
+      connectionBroker: broker,
+      deviceSchema: deviceSchema,
+      deviceDelegate: deviceDelegate,
+      logger: logger
+    )
     _brokerEventTask = Task { [weak self] in
       guard let self else { return }
       for await event in await broker.events {
@@ -140,14 +227,28 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
     _ event: SwiftOCA.OcaConnectionBroker.Event
   ) async {
     switch event.eventType {
-    case .deviceAdded:
+    case .deviceAdded, .deviceUpdated:
+      logger
+        .debug(
+          "Device \(event.eventType == .deviceAdded ? "added" : "updated"): \(event.deviceIdentifier)"
+        )
       if !currentDeviceIdentifiers.contains(event.deviceIdentifier.id) {
         currentDeviceIdentifiers.append(event.deviceIdentifier.id)
       }
+      for entry in _schemaEntries.values {
+        for profile in entry.profiles.actionObjects {
+          guard profile.deviceIndices[event.deviceIdentifier] != nil else { continue }
+          guard profile.remoteObjectCount(for: event.deviceIdentifier) == 0 else { continue }
+          await _activateProfile(profile, to: event.deviceIdentifier)
+        }
+      }
     case .deviceRemoved:
-      for profile in profiles.actionObjects {
-        guard profile.deviceIndices[event.deviceIdentifier] != nil else { continue }
-        try? await unbindProfile(profile, from: event.deviceIdentifier)
+      logger.debug("Device removed: \(event.deviceIdentifier)")
+      for entry in _schemaEntries.values {
+        for profile in entry.profiles.actionObjects {
+          guard profile.deviceIndices[event.deviceIdentifier] != nil else { continue }
+          await _deactivateProfile(profile, from: event.deviceIdentifier)
+        }
       }
       currentDeviceIdentifiers.removeAll { $0 == event.deviceIdentifier.id }
     default:
@@ -156,8 +257,11 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
   }
 
   public func onEvent(_ event: SwiftOCA.OcaEvent, parameters: Data) async {
-    for profile in profiles.actionObjects {
-      await profile.handleLocalEvent(event, parameters: parameters)
+    logger.debug("onEvent: emitterONo=\(event.emitterONo), eventID=\(event.eventID)")
+    for entry in _schemaEntries.values {
+      for profile in entry.profiles.actionObjects {
+        await profile.handleLocalEvent(event, parameters: parameters)
+      }
     }
   }
 
@@ -172,23 +276,43 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
 
   @discardableResult
   public func addProfile(schema: String, name: String? = nil) async throws -> OcaONo {
+    let entry = try _schemaEntry(for: schema)
     let profileUUID = UUID()
+    let profileIndex = entry.allocateProfileIndex()
+    let profileONo = try allocateProfileONo()
+    let proxyBlockONo = try allocateProfileONo()
     let profile = try await OcaProfile(
       role: profileUUID,
+      objectNumber: profileONo,
+      profileIndex: profileIndex,
       schema: schema,
       coordinator: self
     )
     if let name { profile.label = name }
-    try await profile.createLocalObjects()
-    try await profiles.add(actionObject: profile)
+    let proxyBlock = try await SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>(
+      objectNumber: proxyBlockONo,
+      lockable: false,
+      role: profileUUID.description,
+      deviceDelegate: device,
+      addToRootBlock: false
+    )
+    try await profile.createLocalObjects(proxyBlock: proxyBlock)
+    try await entry.proxies.add(actionObject: proxyBlock)
+    try await entry.profiles.add(actionObject: profile)
+    profile.proxyBlock = proxyBlock
+    logger.debug("Added \(profile)")
     return profile.objectNumber
   }
 
-  private func _findProfile(oNo: OcaONo) throws -> OcaProfile {
-    guard let profile = profiles.actionObjects.first(where: { $0.objectNumber == oNo }) else {
-      throw OcaCoordinatorError.profileNotFound
+  func _findProfile(oNo: OcaONo) throws -> OcaProfile {
+    for entry in _schemaEntries.values {
+      if let profile = entry.profiles.actionObjects
+        .first(where: { $0.objectNumber == oNo })
+      {
+        return profile
+      }
     }
-    return profile
+    throw OcaCoordinatorError.profileNotFound
   }
 
   public struct AddProfileParameters: Ocp1ParametersReflectable, Sendable {
@@ -209,6 +333,11 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
     public let deviceIdentifier: OcaString
   }
 
+  public struct FindOrDeleteProfileByNameParameters: Ocp1ParametersReflectable, Sendable {
+    public let name: OcaString
+    public let schema: OcaString
+  }
+
   override public func handleCommand(
     _ command: Ocp1Command,
     from controller: any OcaController
@@ -226,7 +355,7 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
       else {
         throw Ocp1Error.status(.parameterError)
       }
-      try await bindProfile(
+      try bindProfile(
         _findProfile(oNo: params.profileONo),
         to: deviceIdentifier,
         deviceIndex: params.deviceIndex == Self.AutoDeviceIndex
@@ -243,9 +372,9 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
       try await unbindProfile(_findProfile(oNo: params.profileONo), from: deviceIdentifier)
       return Ocp1Response()
     case OcaMethodID("3.5"):
-      let name: OcaString = try decodeCommand(command)
+      let params: FindOrDeleteProfileByNameParameters = try decodeCommand(command)
       try await ensureWritable(by: controller, command: command)
-      try await deleteProfile(named: name)
+      try await deleteProfile(named: params.name, schema: params.schema)
       return Ocp1Response()
     case OcaMethodID("3.6"):
       let uuid: OcaString = try decodeCommand(command)
@@ -256,9 +385,9 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
       try await deleteProfile(uuid: uuid)
       return Ocp1Response()
     case OcaMethodID("3.7"):
-      let name: OcaString = try decodeCommand(command)
+      let params: FindOrDeleteProfileByNameParameters = try decodeCommand(command)
       try await ensureReadable(by: controller, command: command)
-      let profile = try findProfile(named: name)
+      let profile = try findProfile(named: params.name, schema: params.schema)
       return try encodeResponse(profile.objectNumber)
     case OcaMethodID("3.8"):
       let uuid: OcaString = try decodeCommand(command)
@@ -274,11 +403,12 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
   }
 
   private func _allocateDeviceIndex(
+    entry: _SchemaEntry,
     for deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier,
     requestedIndex: OcaONo?,
     maxInstances: Int
   ) throws -> OcaONo {
-    let used = _deviceIndices[deviceIdentifier, default: []]
+    let used = entry.deviceIndices[deviceIdentifier, default: []]
     if let requestedIndex {
       guard requestedIndex < OcaONo(maxInstances) else {
         throw OcaCoordinatorError.deviceIndexInvalid
@@ -286,12 +416,12 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
       guard !used.contains(requestedIndex) else {
         throw OcaCoordinatorError.deviceIndexExhausted
       }
-      _deviceIndices[deviceIdentifier, default: []].insert(requestedIndex)
+      entry.deviceIndices[deviceIdentifier, default: []].insert(requestedIndex)
       return requestedIndex
     }
     for index in OcaONo(0)..<OcaONo(maxInstances) {
       if !used.contains(index) {
-        _deviceIndices[deviceIdentifier, default: []].insert(index)
+        entry.deviceIndices[deviceIdentifier, default: []].insert(index)
         return index
       }
     }
@@ -299,12 +429,13 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
   }
 
   private func _releaseDeviceIndex(
+    entry: _SchemaEntry,
     _ index: OcaONo,
     for deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
   ) {
-    _deviceIndices[deviceIdentifier]?.remove(index)
-    if _deviceIndices[deviceIdentifier]?.isEmpty == true {
-      _deviceIndices.removeValue(forKey: deviceIdentifier)
+    entry.deviceIndices[deviceIdentifier]?.remove(index)
+    if entry.deviceIndices[deviceIdentifier]?.isEmpty == true {
+      entry.deviceIndices.removeValue(forKey: deviceIdentifier)
     }
   }
 
@@ -320,7 +451,7 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
     deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier,
     deviceIndex: OcaONo,
     connection: Ocp1Connection,
-    schema: OccProfileObjectSchema,
+    schema: OcaProfileObjectSchema,
     _ body: (any OcaObjectBindingRepresentable, SwiftOCA.OcaRoot) async throws -> ()
   ) async throws {
     try await schema.applyRecursive { objectSchema, _, _ in
@@ -345,7 +476,7 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
     to deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier,
     deviceIndex: OcaONo,
     connection: Ocp1Connection,
-    schema: OccProfileObjectSchema
+    schema: OcaProfileObjectSchema
   ) async throws {
     try await _forEachBinding(
       profile: profile,
@@ -363,7 +494,7 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
     from deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier,
     deviceIndex: OcaONo,
     connection: Ocp1Connection,
-    schema: OccProfileObjectSchema
+    schema: OcaProfileObjectSchema
   ) async {
     try? await _forEachBinding(
       profile: profile,
@@ -380,83 +511,126 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
     _ profile: OcaProfile,
     to deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier,
     deviceIndex: OcaONo? = nil
-  ) async throws {
-    let connection = try await _connection(for: deviceIdentifier)
+  ) throws {
+    let entry = try _schemaEntry(for: profile.schema)
     let schema = try profile.profileSchema
-    let maxInstances = schema.blocks.first?.remoteObjectCount ?? 0
+    let maxInstances = schema.blocks.map(\.remoteObjectCount).min() ?? 0
     let index = try _allocateDeviceIndex(
+      entry: entry,
       for: deviceIdentifier, requestedIndex: deviceIndex, maxInstances: maxInstances
     )
-    var boundBlocks = [OccProfileObjectSchema]()
-    do {
-      for block in schema.blocks {
-        try await _bindProfile(
-          profile, to: deviceIdentifier, deviceIndex: index,
-          connection: connection, schema: block
-        )
-        boundBlocks.append(block)
-      }
-    } catch {
-      for block in boundBlocks {
-        await _unbindProfile(
-          profile, from: deviceIdentifier, deviceIndex: index,
-          connection: connection, schema: block
-        )
-      }
-      _releaseDeviceIndex(index, for: deviceIdentifier)
-      throw error
-    }
     profile.deviceIndices[deviceIdentifier] = index
     profile.boundDevices.append(deviceIdentifier.id)
+    logger.debug("Bound \(profile) to \(deviceIdentifier) at index \(index)")
   }
 
   public func unbindProfile(
     _ profile: OcaProfile,
     from deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
   ) async throws {
+    let entry = try _schemaEntry(for: profile.schema)
     guard let index = profile.deviceIndices[deviceIdentifier] else {
       return
     }
-    let connection = try await _connection(for: deviceIdentifier)
-    let schema = try profile.profileSchema
+    await _deactivateProfile(profile, from: deviceIdentifier)
+    _releaseDeviceIndex(entry: entry, index, for: deviceIdentifier)
+    profile.deviceIndices.removeValue(forKey: deviceIdentifier)
+    profile.boundDevices.removeAll { $0 == deviceIdentifier.id }
+    logger.debug("Unbound \(profile) from \(deviceIdentifier)")
+  }
+
+  private func _activateProfile(
+    _ profile: OcaProfile,
+    to deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
+  ) async {
+    guard let index = profile.deviceIndices[deviceIdentifier] else { return }
+    logger.debug("Activating \(profile) for \(deviceIdentifier)")
+    do {
+      try await connectionBroker.connect(device: deviceIdentifier)
+      let connection = try await _connection(for: deviceIdentifier)
+      let schema = try profile.profileSchema
+      var activatedBlocks = [OcaProfileObjectSchema]()
+      do {
+        for block in schema.blocks {
+          try await _bindProfile(
+            profile, to: deviceIdentifier, deviceIndex: index,
+            connection: connection, schema: block
+          )
+          activatedBlocks.append(block)
+        }
+        logger.debug("Activated \(profile) for \(deviceIdentifier)")
+      } catch {
+        logger.warning("Failed to activate \(profile) for \(deviceIdentifier): \(error)")
+        for block in activatedBlocks {
+          await _unbindProfile(
+            profile, from: deviceIdentifier, deviceIndex: index,
+            connection: connection, schema: block
+          )
+        }
+      }
+    } catch {
+      logger.warning("Failed to connect to \(deviceIdentifier) for activation: \(error)")
+    }
+  }
+
+  private func _deactivateProfile(
+    _ profile: OcaProfile,
+    from deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
+  ) async {
+    guard let index = profile.deviceIndices[deviceIdentifier] else { return }
+    logger.debug("Deactivating \(profile) from \(deviceIdentifier)")
+    guard let connection = try? await _connection(for: deviceIdentifier) else { return }
+    let schema = try? profile.profileSchema
+    guard let schema else { return }
     for block in schema.blocks {
       await _unbindProfile(
         profile, from: deviceIdentifier, deviceIndex: index,
         connection: connection, schema: block
       )
     }
-    _releaseDeviceIndex(index, for: deviceIdentifier)
-    profile.deviceIndices.removeValue(forKey: deviceIdentifier)
-    profile.boundDevices.removeAll { $0 == deviceIdentifier.id }
+    logger.debug("Deactivated \(profile) from \(deviceIdentifier)")
   }
 
   private func _deleteProfile(_ profile: OcaProfile) async throws {
+    let entry = try _schemaEntry(for: profile.schema)
     for (deviceIdentifier, _) in profile.deviceIndices {
       try? await unbindProfile(profile, from: deviceIdentifier)
     }
     try await profile.deleteLocalObjects()
-    try await profiles.delete(actionObject: profile)
+    if let proxyBlock = profile.proxyBlock {
+      try await entry.proxies.delete(actionObject: proxyBlock)
+      try await (device).deregister(objectNumber: proxyBlock.objectNumber)
+      profile.proxyBlock = nil
+    }
+    try await entry.profiles.delete(actionObject: profile)
+    logger.debug("Deleted \(profile)")
   }
 
   public func deleteProfile(uuid: UUID) async throws {
     try await _deleteProfile(findProfile(uuid: uuid))
   }
 
-  public func deleteProfile(named name: String) async throws {
-    try await _deleteProfile(findProfile(named: name))
+  public func deleteProfile(named name: String, schema: String) async throws {
+    try await _deleteProfile(findProfile(named: name, schema: schema))
   }
 
-  public func findProfile(named name: String) throws -> OcaProfile {
-    guard let profile = profiles.actionObjects.first(where: { $0.role == name }) else {
+  public func findProfile(named name: String, schema: String) throws -> OcaProfile {
+    let entry = try _schemaEntry(for: schema)
+    guard let profile = entry.profiles.actionObjects.first(where: { $0.label == name }) else {
       throw OcaCoordinatorError.profileNotFound
     }
     return profile
   }
 
   public func findProfile(uuid: UUID) throws -> OcaProfile {
-    guard let profile = profiles.actionObjects.first(where: { $0.role == uuid.description }) else {
-      throw OcaCoordinatorError.profileNotFound
+    let uuidString = uuid.description
+    for entry in _schemaEntries.values {
+      if let profile = entry.profiles.actionObjects
+        .first(where: { $0.role == uuidString })
+      {
+        return profile
+      }
     }
-    return profile
+    throw OcaCoordinatorError.profileNotFound
   }
 }

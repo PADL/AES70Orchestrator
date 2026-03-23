@@ -25,6 +25,9 @@ import Foundation
 @OcaDevice
 protocol OcaObjectBindingRepresentable: Sendable {
   func handleLocalEvent(_ event: OcaEvent, parameters: Data) async
+  func hasRemoteObject(
+    for deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
+  ) -> Bool
   func enroll(
     remoteObject: SwiftOCA.OcaRoot,
     from remoteDevice: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
@@ -58,19 +61,35 @@ public final class OcaObjectBinding<
     Task { @OcaDevice in profile.removeObjectBinding(for: localObjectNumber) }
   }
 
+  func hasRemoteObject(
+    for deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
+  ) -> Bool {
+    remoteObjects[deviceIdentifier] != nil
+  }
+
   // handle a local event propagated from the OcaDevice's global onEvent handler; this should
   // forward to all the remote devices
   @OcaDevice
   func handleLocalEvent(_ event: OcaEvent, parameters: Data) async {
-    let decoder = Ocp1Decoder()
-    guard let eventData = try? decoder.decode(
-      OcaPropertyChangedEventData<Data>.self,
-      from: parameters
-    ) else { return }
+    guard let eventData = try? OcaPropertyChangedEventData<Data>(data: parameters) else {
+      profile?.coordinator?.logger.warning(
+        "handleLocalEvent: failed to decode event data for ONo \(event.emitterONo)"
+      )
+      return
+    }
 
-    for (_, remoteObject) in remoteObjects {
+    profile?.coordinator?.logger.debug(
+      "handleLocalEvent: forwarding propertyID \(eventData.propertyID) to \(remoteObjects.count) remote object(s)"
+    )
+    for (deviceID, remoteObject) in remoteObjects {
       let remoteEvent = OcaEvent(emitterONo: remoteObject.objectNumber, eventID: event.eventID)
-      try? await remoteObject.forward(event: remoteEvent, eventData: eventData)
+      do {
+        try await remoteObject.forward(event: remoteEvent, eventData: eventData)
+      } catch {
+        profile?.coordinator?.logger.warning(
+          "handleLocalEvent: failed to forward to \(deviceID): \(error)"
+        )
+      }
     }
   }
 
@@ -81,11 +100,7 @@ public final class OcaObjectBinding<
     parameters: Data,
     deviceIdentifier origin: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
   ) async {
-    let decoder = Ocp1Decoder()
-    guard let eventData = try? decoder.decode(
-      OcaPropertyChangedEventData<Data>.self,
-      from: parameters
-    ) else { return }
+    guard let eventData = try? OcaPropertyChangedEventData<Data>(data: parameters) else { return }
 
     // forward to local object
     let localEvent = OcaEvent(emitterONo: localObject.objectNumber, eventID: event.eventID)
@@ -106,6 +121,7 @@ public final class OcaObjectBinding<
       throw Ocp1Error.status(.parameterError)
     }
     remoteObjects[remoteDevice] = remoteObject
+    try await localObject.copyProperties(to: remoteObject)
 
     guard let connectionDelegate = remoteObject.connectionDelegate else {
       throw Ocp1Error.noConnectionDelegate

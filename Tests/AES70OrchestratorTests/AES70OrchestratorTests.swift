@@ -50,21 +50,21 @@ struct OcaONoMaskTests {
   }
 
   @Test
-  func instanceCountWithContiguousMask() {
+  func instanceCountWithContiguousMask() throws {
     let mask = OcaONoMask(oNo: 0x100, mask: 0x0F)
-    #expect(mask.instanceCount == 4)
+    #expect(try mask.instanceCount == 16)
   }
 
   @Test
-  func instanceCountWithShiftedMask() {
+  func instanceCountWithShiftedMask() throws {
     let mask = OcaONoMask(oNo: 0x100, mask: 0x30)
-    #expect(mask.instanceCount == 2)
+    #expect(try mask.instanceCount == 4)
   }
 
   @Test
-  func instanceCountZeroMask() {
+  func instanceCountZeroMask() throws {
     let mask = OcaONoMask(oNo: 0x100, mask: 0)
-    #expect(mask.instanceCount == 0)
+    #expect(try mask.instanceCount == 1)
   }
 
   @Test
@@ -97,7 +97,7 @@ struct OcaONoMaskTests {
 @Suite
 struct OcaProfileObjectSchemaTests {
   @Test
-  func leafSchema() {
+  func leafSchema() throws {
     let schema = OcaProfileObjectSchema(
       role: "Gain",
       type: SwiftOCADevice.OcaGain.self,
@@ -105,7 +105,7 @@ struct OcaProfileObjectSchemaTests {
     )
     #expect(schema.isLeaf)
     #expect(!schema.isContainer)
-    #expect(schema.remoteObjectCount == 16)
+    #expect(try schema.remoteObjectCount == 16)
     #expect(schema.actionObjectSchema.isEmpty)
   }
 
@@ -166,7 +166,7 @@ struct OcaProfileObjectSchemaTests {
 @Suite
 struct OcaProfileSchemaTests {
   @Test
-  func minimumRemoteObjectCount() {
+  func minimumRemoteObjectCount() throws {
     let block1 = OcaProfileObjectSchema(
       role: "Block1",
       type: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>.self,
@@ -178,7 +178,7 @@ struct OcaProfileSchemaTests {
       remoteObjectNumber: OcaONoMask(oNo: 0x200, mask: 0x03)
     )
     let schema = OcaProfileSchema(name: "test", blocks: [block1, block2])
-    let minInstances = schema.blocks.map(\.remoteObjectCount).min() ?? 0
+    let minInstances = try schema.blocks.map { try $0.remoteObjectCount }.min() ?? 0
     #expect(minInstances == 4)
   }
 }
@@ -427,6 +427,128 @@ struct CoordinatorTests {
     #expect(!allLocalONos.isEmpty)
     for localONo in allLocalONos {
       #expect(localONo < ReservedONoLimit, "Local ONo \(localONo) must be below \(ReservedONoLimit)")
+    }
+  }
+
+  static let _testDeviceIdentifier = OcaConnectionBroker.DeviceIdentifier(
+    serviceType: .tcp,
+    modelGUID: OcaModelGUID(mfrCode: .init((0, 0, 0)), modelCode: (1, 2, 3, 4)),
+    serialNumber: "TestDevice-001",
+    name: "Test"
+  )
+
+  @Test
+  func addDuplicateProfileNameThrows() async throws {
+    let (coordinator, _device) = try await Self._makeCoordinator()
+    _ = try await coordinator.addProfile(schema: "ChannelStrip", name: "Dup")
+    await #expect(throws: OcaCoordinatorError.self) {
+      try await coordinator.addProfile(schema: "ChannelStrip", name: "Dup")
+    }
+  }
+
+  @Test
+  func addDuplicateProfileUUIDThrows() async throws {
+    let (coordinator, _device) = try await Self._makeCoordinator()
+    let uuid = UUID()
+    _ = try await coordinator.addProfile(schema: "ChannelStrip", uuid: uuid)
+    await #expect(throws: OcaCoordinatorError.self) {
+      try await coordinator.addProfile(schema: "ChannelStrip", uuid: uuid)
+    }
+  }
+
+  @Test
+  func bindAlreadyBoundThrows() async throws {
+    let (coordinator, _device) = try await Self._makeCoordinator()
+    let oNo = try await coordinator.addProfile(schema: "ChannelStrip")
+    let profile = try await coordinator._findProfile(oNo: oNo)
+    try await coordinator.bindProfile(profile, to: Self._testDeviceIdentifier)
+    await #expect(throws: OcaCoordinatorError.self) {
+      try await coordinator.bindProfile(profile, to: Self._testDeviceIdentifier)
+    }
+  }
+
+  @Test
+  func unbindNotBoundThrows() async throws {
+    let (coordinator, _device) = try await Self._makeCoordinator()
+    let oNo = try await coordinator.addProfile(schema: "ChannelStrip")
+    let profile = try await coordinator._findProfile(oNo: oNo)
+    await #expect(throws: OcaCoordinatorError.self) {
+      try await coordinator.unbindProfile(profile, from: Self._testDeviceIdentifier)
+    }
+  }
+
+  @Test
+  func autobindRejectsManualBind() async throws {
+    let gainSchema = OcaProfileObjectSchema(
+      role: "Gain",
+      type: SwiftOCADevice.OcaGain.self,
+      localObjectNumber: OcaONoMask(oNo: 0x2000, mask: 0x0F),
+      remoteObjectNumber: OcaONoMask(oNo: 0x200, mask: 0x03)
+    )
+    let profileSchema = OcaProfileSchema(
+      name: "AutoGain",
+      blocks: [gainSchema],
+      automaticallyBind: true
+    )
+    let deviceSchema = OcaDeviceSchema(
+      name: "TestDevice",
+      profileSchemas: [profileSchema]
+    )
+    let device = OcaDevice()
+    try await device.initializeDefaultObjects()
+    let broker = await OcaConnectionBroker(
+      connectionOptions: .init(),
+      serviceTypes: nil,
+      deviceModels: nil
+    )
+    let coordinator = try await OcaCoordinator(
+      connectionBroker: broker,
+      deviceSchema: deviceSchema,
+      deviceDelegate: device
+    )
+    let oNo = try await coordinator.addProfile(schema: "AutoGain")
+    let profile = try await coordinator._findProfile(oNo: oNo)
+
+    await #expect(throws: OcaCoordinatorError.self) {
+      try await coordinator.bindProfile(profile, to: Self._testDeviceIdentifier)
+    }
+    await #expect(throws: OcaCoordinatorError.self) {
+      try await coordinator.unbindProfile(profile, from: Self._testDeviceIdentifier)
+    }
+  }
+
+  @Test
+  func autobindEnforcesSingleProfile() async throws {
+    let gainSchema = OcaProfileObjectSchema(
+      role: "Gain",
+      type: SwiftOCADevice.OcaGain.self,
+      localObjectNumber: OcaONoMask(oNo: 0x2000, mask: 0x0F),
+      remoteObjectNumber: OcaONoMask(oNo: 0x200, mask: 0x03)
+    )
+    let profileSchema = OcaProfileSchema(
+      name: "AutoGain",
+      blocks: [gainSchema],
+      automaticallyBind: true
+    )
+    let deviceSchema = OcaDeviceSchema(
+      name: "TestDevice",
+      profileSchemas: [profileSchema]
+    )
+    let device = OcaDevice()
+    try await device.initializeDefaultObjects()
+    let broker = await OcaConnectionBroker(
+      connectionOptions: .init(),
+      serviceTypes: nil,
+      deviceModels: nil
+    )
+    let coordinator = try await OcaCoordinator(
+      connectionBroker: broker,
+      deviceSchema: deviceSchema,
+      deviceDelegate: device
+    )
+    _ = try await coordinator.addProfile(schema: "AutoGain")
+    await #expect(throws: OcaCoordinatorError.self) {
+      try await coordinator.addProfile(schema: "AutoGain")
     }
   }
 }
@@ -718,5 +840,32 @@ struct YAMLSchemaTests {
     await #expect(throws: OcaCoordinatorError.self) {
       try await OcaDeviceSchema(yaml: yaml)
     }
+  }
+
+  static let _autobindYAML = """
+  device:
+    name: AutoDevice
+    profiles:
+      - AutoProfile:
+          autobind: true
+          blocks:
+            - Gain:
+                classID: 1.1.1.5
+                match: 0x00000200/0x0000000F
+                objectNumber: 0x00002000/0x000000F0
+  """
+
+  @Test
+  func parseAutobind() async throws {
+    let schema = try await OcaDeviceSchema(yaml: Self._autobindYAML)
+    #expect(schema.profileSchemas.count == 1)
+    #expect(schema.profileSchemas[0].automaticallyBind == true)
+    #expect(schema.profileSchemas[0].blocks.count == 1)
+  }
+
+  @Test
+  func parseAutobindDefaultsFalse() async throws {
+    let schema = try await OcaDeviceSchema(yaml: Self._minimalYAML)
+    #expect(schema.profileSchemas[0].automaticallyBind == false)
   }
 }

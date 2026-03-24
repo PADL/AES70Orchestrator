@@ -67,7 +67,7 @@ extension OcaDeviceSchema {
   @OcaDevice
   private static func _parseProfileSchema(_ node: Node) throws -> OcaProfileSchema {
     guard let mapping = node.mapping, mapping.count == 1,
-          let (nameNode, blocksNode) = mapping.first
+          let (nameNode, valueNode) = mapping.first
     else {
       throw OcaCoordinatorError
         .schemaParseError("profile must be a single-key mapping {name: [blocks]}")
@@ -75,15 +75,29 @@ extension OcaDeviceSchema {
     guard let name = nameNode.string else {
       throw OcaCoordinatorError.schemaParseError("profile name must be a string")
     }
-    guard let blockSequence = blocksNode.sequence else {
+
+    let blockSequence: Node.Sequence
+    var automaticallyBind = false
+
+    if let sequence = valueNode.sequence {
+      blockSequence = sequence
+    } else if let valueMapping = valueNode.mapping {
+      guard let seq = valueMapping["blocks"]?.sequence else {
+        throw OcaCoordinatorError
+          .schemaParseError("profile '\(name)' mapping must contain 'blocks' sequence")
+      }
+      blockSequence = seq
+      automaticallyBind = valueMapping["autobind"]?.bool ?? false
+    } else {
       throw OcaCoordinatorError
-        .schemaParseError("profile '\(name)' value must be a sequence of blocks")
+        .schemaParseError("profile '\(name)' value must be a sequence of blocks or a mapping")
     }
+
     var blocks = [OcaProfileObjectSchema]()
     for node in blockSequence {
       try blocks.append(_parseObjectSchema(node))
     }
-    return OcaProfileSchema(name: name, blocks: blocks)
+    return OcaProfileSchema(name: name, blocks: blocks, automaticallyBind: automaticallyBind)
   }
 
   @OcaDevice

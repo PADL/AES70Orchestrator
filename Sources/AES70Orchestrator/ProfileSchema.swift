@@ -17,6 +17,9 @@
 import SwiftOCA
 import SwiftOCADevice
 
+/// A struct that pairs a base OCA object number with a bitmask. The mask bits determine
+/// how many instances can be numbered within the base object number. For example,
+/// `OcaONoMask(oNo: 0x100, mask: 0x0F)` allows 16 instances (0x100–0x10F).
 public struct OcaONoMask: Sendable, Equatable, CustomStringConvertible {
   public let oNo: OcaONo
   public let mask: OcaONo
@@ -27,11 +30,18 @@ public struct OcaONoMask: Sendable, Equatable, CustomStringConvertible {
   }
 
   public var instanceCount: Int {
-    guard mask != 0 else { return 0 }
-    let shifted = mask >> mask.trailingZeroBitCount
-    let onesCount = (~shifted).trailingZeroBitCount
-    assert(shifted == (1 << onesCount) &- 1, "mask bits must be contiguous")
-    return onesCount
+    get throws {
+      guard mask != 0 else { return 1 }
+
+      let shifted = mask >> mask.trailingZeroBitCount
+      let bitCount = (~shifted).trailingZeroBitCount
+
+      guard shifted == (1 << bitCount) &- 1 else {
+        throw OcaCoordinatorError.schemaParseError("mask bits must be contiguous")
+      }
+
+      return 1 << bitCount
+    }
   }
 
   public var description: String {
@@ -54,7 +64,7 @@ public struct OcaONoMask: Sendable, Equatable, CustomStringConvertible {
   }
 
   func objectNumber(for index: OcaONo) throws -> OcaONo {
-    guard index < (1 << instanceCount) else {
+    guard try index < instanceCount else {
       throw OcaCoordinatorError.profileONoAllocationExhausted
     }
     return oNo | (index << mask.trailingZeroBitCount)
@@ -66,6 +76,9 @@ public struct OcaONoMask: Sendable, Equatable, CustomStringConvertible {
   }
 }
 
+/// Describes a single object within a profile schema, specifying its role name, OCA class type,
+/// optional local object number allocation, remote object number matching pattern, and any
+/// nested action objects for container types.
 public struct OcaProfileObjectSchema: Sendable, CustomStringConvertible {
   public let role: String
 
@@ -79,8 +92,10 @@ public struct OcaProfileObjectSchema: Sendable, CustomStringConvertible {
 
   // the number of instances that can be instantiated locally
   public var localInstanceCount: Int {
-    guard let localObjectNumber else { return 0 }
-    return 1 << localObjectNumber.instanceCount
+    get throws {
+      guard let localObjectNumber else { return 0 }
+      return try localObjectNumber.instanceCount
+    }
   }
 
   // the remote object number(s). the bits set in the mask determine how many profiles can be bound
@@ -88,7 +103,9 @@ public struct OcaProfileObjectSchema: Sendable, CustomStringConvertible {
   public let remoteObjectNumber: OcaONoMask
 
   public var remoteObjectCount: Int {
-    1 << remoteObjectNumber.instanceCount
+    get throws {
+      try remoteObjectNumber.instanceCount
+    }
   }
 
   public var isContainer: Bool {
@@ -147,7 +164,7 @@ public struct OcaProfileObjectSchema: Sendable, CustomStringConvertible {
     }
   }
 
-  func applyRecursiveSync(
+  func applyRecursive(
     parentRolePath: [String] = [],
     _ body: (
       _ schema: OcaProfileObjectSchema,
@@ -159,21 +176,26 @@ public struct OcaProfileObjectSchema: Sendable, CustomStringConvertible {
     try body(self, rolePath, parentRolePath.isEmpty ? nil : parentRolePath)
     guard isContainer, !actionObjectSchema.isEmpty else { return }
     for child in actionObjectSchema {
-      try child.applyRecursiveSync(parentRolePath: rolePath, body)
+      try child.applyRecursive(parentRolePath: rolePath, body)
     }
   }
 }
 
+/// A named profile schema consisting of one or more top-level block definitions. When
+/// `automaticallyBind` is set, profiles of this schema are automatically bound to all
+/// discovered devices and only a single profile instance is permitted.
 public final class OcaProfileSchema: Sendable, CustomStringConvertible {
   public let name: String
   public let blocks: [OcaProfileObjectSchema]
+  public let automaticallyBind: Bool
 
   public var description: String {
-    "OcaProfileSchema(name: \(name), blocks: \(blocks.count))"
+    "OcaProfileSchema(name: \(name), blocks: \(blocks.count), autobind: \(automaticallyBind))"
   }
 
-  public init(name: String, blocks: [OcaProfileObjectSchema]) {
+  public init(name: String, blocks: [OcaProfileObjectSchema], automaticallyBind: Bool = false) {
     self.name = name
     self.blocks = blocks
+    self.automaticallyBind = automaticallyBind
   }
 }

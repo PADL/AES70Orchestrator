@@ -41,6 +41,10 @@ public enum OcaCoordinatorError: Error {
   case profileONoAllocationExhausted
   case profileSchemaNotFound
   case profileNotFound
+  case profileAlreadyExists
+  case profileAlreadyBound
+  case profileNotBound
+  case profileAutomaticallyBound
   case deviceIndexExhausted
   case deviceIndexInvalid
   case persistenceError
@@ -257,7 +261,15 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
       if !currentDeviceIdentifiers.contains(event.deviceIdentifier.id) {
         currentDeviceIdentifiers.append(event.deviceIdentifier.id)
       }
-      for entry in _schemaEntries.values {
+      for (schemaName, entry) in _schemaEntries {
+        // auto-bind profiles whose schema has automaticallyBind set
+        if let schema = try? profileSchema(named: schemaName), schema.automaticallyBind {
+          for profile in entry.profiles.actionObjects {
+            if profile.deviceIndices[event.deviceIdentifier] == nil {
+              try? _bindProfile(profile, to: event.deviceIdentifier)
+            }
+          }
+        }
         for profile in entry.profiles.actionObjects {
           guard profile.deviceIndices[event.deviceIdentifier] != nil else { continue }
           guard profile.remoteObjectCount(for: event.deviceIdentifier) == 0 else { continue }
@@ -266,10 +278,16 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
       }
     case .deviceRemoved:
       logger.debug("Device removed: \(event.deviceIdentifier)")
-      for entry in _schemaEntries.values {
+      for (schemaName, entry) in _schemaEntries {
         for profile in entry.profiles.actionObjects {
           guard profile.deviceIndices[event.deviceIdentifier] != nil else { continue }
           await _deactivateProfile(profile, from: event.deviceIdentifier)
+        }
+        // auto-unbind profiles whose schema has automaticallyBind set
+        if let schema = try? profileSchema(named: schemaName), schema.automaticallyBind {
+          for profile in entry.profiles.actionObjects {
+            try? await _unbindProfile(profile, from: event.deviceIdentifier)
+          }
         }
       }
       currentDeviceIdentifiers.removeAll { $0 == event.deviceIdentifier.id }
@@ -304,7 +322,16 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
     uuid: UUID? = nil
   ) async throws -> OcaONo {
     let entry = try _schemaEntry(for: schema)
-    let profileUUID = uuid ?? UUID()
+    let profileSchema = try profileSchema(named: schema)
+    if let name, entry.profiles.actionObjects.contains(where: { $0.label == name }) {
+      throw OcaCoordinatorError.profileAlreadyExists
+    }
+    // autobind schemas use a fixed nil UUID to enforce a single profile instance
+    let resolvedUUID = profileSchema.automaticallyBind ? UUID(uuidString: "00000000-0000-0000-0000-000000000000")! : uuid
+    if let resolvedUUID, (try? findProfile(uuid: resolvedUUID)) != nil {
+      throw OcaCoordinatorError.profileAlreadyExists
+    }
+    let profileUUID = resolvedUUID ?? UUID()
     let profileIndex = entry.allocateProfileIndex()
     let profileONo = try allocateProfileONo()
     let proxyBlockONo = try allocateProfileONo()
@@ -425,7 +452,7 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
       connection: connection,
       schema: schema
     ) { binding, remoteObject in
-      try await binding.enroll(remoteObject: remoteObject, from: deviceIdentifier)
+      try await binding.bind(remoteObject: remoteObject, from: deviceIdentifier)
     }
   }
 
@@ -443,18 +470,21 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
       connection: connection,
       schema: schema
     ) { binding, remoteObject in
-      try await binding.unenroll(remoteObject: remoteObject, from: deviceIdentifier)
+      try await binding.unbind(remoteObject: remoteObject, from: deviceIdentifier)
     }
   }
 
-  public func bindProfile(
+  private func _bindProfile(
     _ profile: OcaProfile,
     to deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier,
     deviceIndex: OcaONo? = nil
   ) throws {
+    guard profile.deviceIndices[deviceIdentifier] == nil else {
+      throw OcaCoordinatorError.profileAlreadyBound
+    }
     let entry = try _schemaEntry(for: profile.schema)
     let schema = try profile.profileSchema
-    let maxInstances = schema.blocks.map(\.remoteObjectCount).min() ?? 0
+    let maxInstances = try schema.blocks.map { try $0.remoteObjectCount }.min() ?? 0
     let index = try _allocateDeviceIndex(
       entry: entry,
       for: deviceIdentifier, requestedIndex: deviceIndex, maxInstances: maxInstances
@@ -464,19 +494,42 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
     logger.debug("Bound \(profile) to \(deviceIdentifier) at index \(index)")
   }
 
-  public func unbindProfile(
+  public func bindProfile(
+    _ profile: OcaProfile,
+    to deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier,
+    deviceIndex: OcaONo? = nil
+  ) throws {
+    let profileSchema = try profile.profileSchema
+    guard !profileSchema.automaticallyBind else {
+      throw OcaCoordinatorError.profileAutomaticallyBound
+    }
+    try _bindProfile(profile, to: deviceIdentifier, deviceIndex: deviceIndex)
+  }
+
+  private func _unbindProfile(
     _ profile: OcaProfile,
     from deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
   ) async throws {
     let entry = try _schemaEntry(for: profile.schema)
     guard let index = profile.deviceIndices[deviceIdentifier] else {
-      return
+      throw OcaCoordinatorError.profileNotBound
     }
     await _deactivateProfile(profile, from: deviceIdentifier)
     _releaseDeviceIndex(entry: entry, index, for: deviceIdentifier)
     profile.deviceIndices.removeValue(forKey: deviceIdentifier)
     profile.boundDevices.removeAll { $0 == deviceIdentifier.id }
     logger.debug("Unbound \(profile) from \(deviceIdentifier)")
+  }
+
+  public func unbindProfile(
+    _ profile: OcaProfile,
+    from deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
+  ) async throws {
+    let profileSchema = try profile.profileSchema
+    guard !profileSchema.automaticallyBind else {
+      throw OcaCoordinatorError.profileAutomaticallyBound
+    }
+    try await _unbindProfile(profile, from: deviceIdentifier)
   }
 
   private func _activateProfile(
@@ -534,7 +587,7 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
   private func _deleteProfile(_ profile: OcaProfile) async throws {
     let entry = try _schemaEntry(for: profile.schema)
     for (deviceIdentifier, _) in profile.deviceIndices {
-      try? await unbindProfile(profile, from: deviceIdentifier)
+      try? await _unbindProfile(profile, from: deviceIdentifier)
     }
     try await profile.deleteLocalObjects()
     if let proxyBlock = profile.proxyBlock {
@@ -585,7 +638,33 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
   typealias FindOrDeleteProfileByNameParameters =
     AES70OrchestratorClient.OcaCoordinator.FindOrDeleteProfileByNameParameters
 
+  private static func _mapError(_ error: OcaCoordinatorError) -> OcaStatus {
+    switch error {
+    case .profileAlreadyExists, .profileAlreadyBound, .profileAutomaticallyBound:
+      .invalidRequest
+    case .profileNotFound, .profileNotBound, .profileSchemaNotFound:
+      .parameterError
+    case .profileONoAllocationExhausted, .deviceIndexExhausted:
+      .processingFailed
+    case .deviceIndexInvalid:
+      .parameterOutOfRange
+    case .persistenceError, .schemaParseError:
+      .deviceError
+    }
+  }
+
   override public func handleCommand(
+    _ command: Ocp1Command,
+    from controller: any OcaController
+  ) async throws -> Ocp1Response {
+    do {
+      return try await _handleCommand(command, from: controller)
+    } catch let error as OcaCoordinatorError {
+      throw Ocp1Error.status(Self._mapError(error))
+    }
+  }
+
+  private func _handleCommand(
     _ command: Ocp1Command,
     from controller: any OcaController
   ) async throws -> Ocp1Response {

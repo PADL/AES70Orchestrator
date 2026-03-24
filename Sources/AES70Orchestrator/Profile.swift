@@ -227,7 +227,7 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     let schema = try profileSchema
     var map = [OcaONo: OcaONoMask]()
     for block in schema.blocks {
-      try block.applyRecursiveSync { objectSchema, _, _ in
+      try block.applyRecursive { objectSchema, _, _ in
         guard let localONoMask = objectSchema.localObjectNumber else { return }
         let actualONo = try localONoMask.objectNumber(for: profileIndex)
         map[actualONo] = localONoMask

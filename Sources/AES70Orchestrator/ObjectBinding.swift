@@ -28,11 +28,11 @@ protocol OcaObjectBindingRepresentable: Sendable {
   func hasRemoteObject(
     for deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
   ) -> Bool
-  func enroll(
+  func bind(
     remoteObject: SwiftOCA.OcaRoot,
     from remoteDevice: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
   ) async throws
-  func unenroll(
+  func unbind(
     remoteObject: SwiftOCA.OcaRoot,
     from remoteDevice: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
   ) async throws
@@ -118,7 +118,7 @@ public final class OcaObjectBinding<
     }
   }
 
-  public func enroll(
+  public func bind(
     remoteObject: SwiftOCA.OcaRoot,
     from remoteDevice: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
   ) async throws {
@@ -143,7 +143,7 @@ public final class OcaObjectBinding<
     remoteSubscriptions[remoteDevice] = cancellable
   }
 
-  public func unenroll(
+  public func unbind(
     remoteObject: SwiftOCA.OcaRoot,
     from remoteDevice: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
   ) async throws {

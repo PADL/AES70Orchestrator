@@ -53,6 +53,22 @@ Each object in the schema specifies:
 - **`match`** — remote object number and mask (`oNo/mask`). The mask bits determine how many profile instances can be bound to a single device.
 - **`objectNumber`** — optional local object number and mask for the proxy object. If omitted, the orchestrator allocates a local object number from the reserved range (below 4096) to avoid conflicts with device-assigned object numbers.
 
+### Profile-level options
+
+When using the mapping form for a profile, the following options are available:
+
+- **`autobind`** — if `true`, profiles of this schema are automatically bound to all discovered devices and cannot be manually bound/unbound. Defaults to `false`.
+
+```yaml
+profiles:
+  - AutoProfile:
+      autobind: true
+      blocks:
+        - Gain:
+            classID: 1.1.1.5
+            match: 0x00000200/0x0000000F
+```
+
 ## Architecture
 
 The framework exposes an OCA device with the following structure:

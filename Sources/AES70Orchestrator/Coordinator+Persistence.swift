@@ -28,8 +28,8 @@ private struct _ProfileManifestEntry: Codable {
 }
 
 extension OcaCoordinator {
-  private func _devicesPath(for schemaName: String) -> String {
-    "\(ArchiveVersion)/\(schemaName)/devices.json"
+  private func _manifestPath(for schemaName: String) -> String {
+    "\(ArchiveVersion)/\(schemaName)/MANIFEST"
   }
 
   private func _profileStatePath(for schemaName: String, uuid: String) -> String {
@@ -66,7 +66,7 @@ extension OcaCoordinator {
         )
       }
       let devicesData = try encoder.encode(manifest)
-      try _addEntry(to: archive, path: _devicesPath(for: schemaName), data: devicesData)
+      try _addEntry(to: archive, path: _manifestPath(for: schemaName), data: devicesData)
 
       // serialize each profile's state with ONo remapping
       for profile in entry.profiles.actionObjects {
@@ -89,8 +89,8 @@ extension OcaCoordinator {
     let decoder = JSONDecoder()
 
     for (schemaName, _) in _schemaEntries {
-      // read devices.json manifest
-      let devicesPath = _devicesPath(for: schemaName)
+      // read manifest
+      let devicesPath = _manifestPath(for: schemaName)
       guard let devicesEntry = archive[devicesPath] else { continue }
 
       var devicesData = Data()

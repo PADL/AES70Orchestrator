@@ -68,10 +68,10 @@ extension OcaCoordinator {
       let devicesData = try encoder.encode(manifest)
       try _addEntry(to: archive, path: _devicesPath(for: schemaName), data: devicesData)
 
-      // serialize each profile's proxy block state
+      // serialize each profile's state with ONo remapping
       for profile in entry.profiles.actionObjects {
-        guard let proxyBlock = profile.proxyBlock else { continue }
-        let jsonObject = try await proxyBlock.serializeParameterDataset()
+        guard profile.proxyBlock != nil else { continue }
+        let jsonObject = try await profile.serializeState()
         let stateData = try JSONSerialization.data(
           withJSONObject: jsonObject,
           options: [.prettyPrinted, .sortedKeys]
@@ -120,8 +120,8 @@ extension OcaCoordinator {
           try bindProfile(profile, to: deviceIdentifier)
         }
 
-        // restore profile state from proxy block serialization
-        guard let proxyBlock = profile.proxyBlock else { continue }
+        // restore profile state with ONo remapping
+        guard profile.proxyBlock != nil else { continue }
         let statePath = _profileStatePath(for: schemaName, uuid: uuidString)
         guard let stateEntry = archive[statePath] else {
           logger.warning("load: missing state entry for profile \(uuidString)")
@@ -139,7 +139,7 @@ extension OcaCoordinator {
           continue
         }
         do {
-          try await proxyBlock.deserializeParameterDataset(jsonObject)
+          try await profile.deserializeState(jsonObject)
         } catch {
           logger.warning("load: failed to deserialize state for profile \(uuidString): \(error)")
         }

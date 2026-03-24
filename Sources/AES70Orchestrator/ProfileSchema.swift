@@ -59,6 +59,11 @@ public struct OcaONoMask: Sendable, Equatable, CustomStringConvertible {
     }
     return oNo | (index << mask.trailingZeroBitCount)
   }
+
+  /// Returns the base ONo with profile index bits cleared.
+  func maskedObjectNumber(for objectNumber: OcaONo) -> OcaONo {
+    objectNumber & ~mask
+  }
 }
 
 public struct OcaProfileObjectSchema: Sendable, CustomStringConvertible {
@@ -139,6 +144,22 @@ public struct OcaProfileObjectSchema: Sendable, CustomStringConvertible {
     guard isContainer, !actionObjectSchema.isEmpty else { return }
     for child in actionObjectSchema {
       try await child.applyRecursive(parentRolePath: rolePath, body)
+    }
+  }
+
+  func applyRecursiveSync(
+    parentRolePath: [String] = [],
+    _ body: (
+      _ schema: OcaProfileObjectSchema,
+      _ rolePath: [String],
+      _ parentRolePath: [String]?
+    ) throws -> ()
+  ) rethrows {
+    let rolePath = parentRolePath + [role]
+    try body(self, rolePath, parentRolePath.isEmpty ? nil : parentRolePath)
+    guard isContainer, !actionObjectSchema.isEmpty else { return }
+    for child in actionObjectSchema {
+      try child.applyRecursiveSync(parentRolePath: rolePath, body)
     }
   }
 }

@@ -20,7 +20,7 @@ import FoundationEssentials
 import Foundation
 #endif
 import SwiftOCA
-import SwiftOCADevice
+@_spi(SwiftOCAPrivate) import SwiftOCADevice
 import Synchronization
 
 private protocol _OcaBlockContainer: OcaBlockContainer {
@@ -216,6 +216,77 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
         ), for: object.objectNumber)
       }
     }
+  }
+
+  private func _buildONoMap() throws -> [OcaONo: OcaONoMask] {
+    let schema = try profileSchema
+    var map = [OcaONo: OcaONoMask]()
+    for block in schema.blocks {
+      try block.applyRecursiveSync { objectSchema, _, _ in
+        guard let localONoMask = objectSchema.localObjectNumber else { return }
+        let actualONo = try localONoMask.objectNumber(for: profileIndex)
+        map[actualONo] = localONoMask
+      }
+    }
+    return map
+  }
+
+  private func _remapONos(
+    in jsonObject: [String: any Sendable],
+    oNoMap: [OcaONo: OcaONoMask],
+    proxyBlockONo: OcaONo,
+    toMasked: Bool
+  ) -> [String: any Sendable] {
+    var result = jsonObject
+
+    if let oNo = result["_oNo"] as? OcaONo {
+      if oNo == proxyBlockONo || (!toMasked && oNo == 0) {
+        // proxy block: use sentinel 0 when serializing, restore actual on deserialize
+        result["_oNo"] = toMasked ? OcaONo(0) : proxyBlockONo
+      } else if toMasked, let mask = oNoMap[oNo] {
+        result["_oNo"] = mask.maskedObjectNumber(for: oNo)
+      } else if !toMasked {
+        // find the mask entry whose base matches this masked ONo
+        for (_, mask) in oNoMap {
+          if mask.maskedObjectNumber(for: oNo) == oNo {
+            result["_oNo"] = try? mask.objectNumber(for: profileIndex)
+            break
+          }
+        }
+      }
+    }
+
+    if let children = result["3.2"] as? [[String: any Sendable]] {
+      result["3.2"] = children.map { child in
+        _remapONos(in: child, oNoMap: oNoMap, proxyBlockONo: proxyBlockONo, toMasked: toMasked)
+      }
+    }
+
+    return result
+  }
+
+  func serializeState() async throws -> [String: any Sendable] {
+    guard let proxyBlock else { throw Ocp1Error.status(.deviceError) }
+    let oNoMap = try _buildONoMap()
+    let jsonObject = try await proxyBlock.serializeParameterDataset()
+    return _remapONos(
+      in: jsonObject,
+      oNoMap: oNoMap,
+      proxyBlockONo: proxyBlock.objectNumber,
+      toMasked: true
+    )
+  }
+
+  func deserializeState(_ jsonObject: [String: any Sendable]) async throws {
+    guard let proxyBlock else { throw Ocp1Error.status(.deviceError) }
+    let oNoMap = try _buildONoMap()
+    let remapped = _remapONos(
+      in: jsonObject,
+      oNoMap: oNoMap,
+      proxyBlockONo: proxyBlock.objectNumber,
+      toMasked: false
+    )
+    try await proxyBlock.deserializeParameterDataset(remapped)
   }
 
   @OcaDevice

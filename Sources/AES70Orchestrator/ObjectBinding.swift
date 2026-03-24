@@ -22,6 +22,8 @@ import Foundation
 @_spi(SwiftOCAPrivate) import SwiftOCA
 @_spi(SwiftOCAPrivate) import SwiftOCADevice
 
+/// Type-erased protocol for object bindings, allowing the profile to dispatch events
+/// and manage remote object lifecycle without knowing the concrete local/remote types.
 @OcaDevice
 protocol OcaObjectBindingRepresentable: Sendable {
   func handleLocalEvent(_ event: OcaEvent, parameters: Data) async
@@ -38,20 +40,26 @@ protocol OcaObjectBindingRepresentable: Sendable {
   ) async throws
 }
 
+/// Binds a local proxy object to its corresponding remote objects on one or more devices,
+/// forwarding property changes and events bidirectionally between them.
 @OcaDevice
 public final class OcaObjectBinding<
   Local: SwiftOCADevice.OcaRoot,
   Remote: SwiftOCA.OcaRoot
 >: OcaObjectBindingRepresentable, Sendable {
   let localObject: Local
+  let lockRemote: Bool
   var remoteObjects = [SwiftOCA.OcaConnectionBroker.DeviceIdentifier: Remote]()
   var remoteSubscriptions =
     [SwiftOCA.OcaConnectionBroker.DeviceIdentifier: Ocp1Connection.SubscriptionCancellable]()
   weak var profile: OcaProfile?
   private var _forwardingFromRemote = false
 
-  public init(localObject: Local, profile: OcaProfile) {
+  private static var _lockStatePropertyID: OcaPropertyID { OcaPropertyID("1.6") }
+
+  public init(localObject: Local, profile: OcaProfile, lockRemote: Bool = false) {
     self.localObject = localObject
+    self.lockRemote = lockRemote
     self.profile = profile
     profile.addObjectBinding(self, for: localObject.objectNumber)
   }
@@ -80,6 +88,8 @@ public final class OcaObjectBinding<
       return
     }
 
+    if lockRemote, eventData.propertyID == Self._lockStatePropertyID { return }
+
     profile?.coordinator?.logger.trace(
       "handleLocalEvent: forwarding propertyID \(eventData.propertyID) to \(remoteObjects.count) remote object(s)"
     )
@@ -107,9 +117,11 @@ public final class OcaObjectBinding<
     _forwardingFromRemote = true
     defer { _forwardingFromRemote = false }
 
-    // forward to local object
-    let localEvent = OcaEvent(emitterONo: localObject.objectNumber, eventID: event.eventID)
-    try? await localObject.forward(event: localEvent, eventData: eventData)
+    // don't forward lockState changes to the local object when lockRemote is set
+    if !(lockRemote && eventData.propertyID == Self._lockStatePropertyID) {
+      let localEvent = OcaEvent(emitterONo: localObject.objectNumber, eventID: event.eventID)
+      try? await localObject.forward(event: localEvent, eventData: eventData)
+    }
 
     // forward to all other remote objects (excluding origin)
     for (deviceID, remoteObject) in remoteObjects where deviceID != origin {
@@ -127,6 +139,10 @@ public final class OcaObjectBinding<
     }
     remoteObjects[remoteDevice] = remoteObject
     try await localObject.copyProperties(to: remoteObject)
+
+    if lockRemote {
+      try? await remoteObject.setLockNoReadWrite()
+    }
 
     guard let connectionDelegate = remoteObject.connectionDelegate else {
       throw Ocp1Error.noConnectionDelegate
@@ -147,6 +163,9 @@ public final class OcaObjectBinding<
     remoteObject: SwiftOCA.OcaRoot,
     from remoteDevice: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
   ) async throws {
+    if lockRemote {
+      try? await remoteObject.unlock()
+    }
     remoteObjects.removeValue(forKey: remoteDevice)
     if let cancellable = remoteSubscriptions.removeValue(forKey: remoteDevice) {
       try await remoteObject.connectionDelegate?.removeSubscription(cancellable)

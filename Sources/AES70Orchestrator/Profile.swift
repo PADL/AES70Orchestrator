@@ -44,6 +44,8 @@ extension SwiftOCADevice.OcaBlock: _OcaBlockContainer {
   }
 }
 
+/// An OCA agent representing a single profile instance. Each profile is bound to one or more
+/// remote devices and manages a set of local proxy objects that mirror remote device objects.
 @OcaDevice
 public final class OcaProfile: SwiftOCADevice.OcaAgent {
   override public class var classID: OcaClassID { OcaClassID(
@@ -217,7 +219,8 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
         }
         addObjectBinding(OcaObjectBinding<SwiftOCADevice.OcaRoot, SwiftOCA.OcaRoot>(
           localObject: object,
-          profile: self
+          profile: self,
+          lockRemote: objectSchema.lockRemote
         ), for: object.objectNumber)
       }
     }

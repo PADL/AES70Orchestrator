@@ -868,4 +868,27 @@ struct YAMLSchemaTests {
     let schema = try await OcaDeviceSchema(yaml: Self._minimalYAML)
     #expect(schema.profileSchemas[0].automaticallyBind == false)
   }
+
+  @Test
+  func parseLockRemote() async throws {
+    let yaml = """
+    device:
+      name: LockDevice
+      profiles:
+        - LockProfile:
+            blocks:
+              - Gain:
+                  classID: 1.1.1.5
+                  match: 0x00000200/0x0000000F
+                  lockRemote: true
+    """
+    let schema = try await OcaDeviceSchema(yaml: yaml)
+    #expect(schema.profileSchemas[0].blocks[0].lockRemote == true)
+  }
+
+  @Test
+  func parseLockRemoteDefaultsFalse() async throws {
+    let schema = try await OcaDeviceSchema(yaml: Self._minimalYAML)
+    #expect(schema.profileSchemas[0].blocks[0].lockRemote == false)
+  }
 }

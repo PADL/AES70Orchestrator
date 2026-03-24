@@ -37,6 +37,7 @@ let ProfileProxiesContainerONo = OcaONo(1026)
 // (one for profiles, one for proxies), so the profile ONo range starts after those
 let MaxProfiles = OcaONo(100)
 
+/// Errors thrown by the orchestrator during profile management, device binding, and schema parsing.
 public enum OcaCoordinatorError: Error {
   case profileONoAllocationExhausted
   case profileSchemaNotFound
@@ -51,6 +52,9 @@ public enum OcaCoordinatorError: Error {
   case schemaParseError(String)
 }
 
+/// The central coordinator that manages profile lifecycle, device discovery, and binding.
+/// It exposes an OCA manager interface and orchestrates connections between local proxy
+/// objects and remote device objects according to the configured device schema.
 @OcaDevice
 public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDeviceEventDelegate {
   override public class var classID: OcaClassID { OcaClassID(
@@ -327,7 +331,8 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
       throw OcaCoordinatorError.profileAlreadyExists
     }
     // autobind schemas use a fixed nil UUID to enforce a single profile instance
-    let resolvedUUID = profileSchema.automaticallyBind ? UUID(uuidString: "00000000-0000-0000-0000-000000000000")! : uuid
+    let resolvedUUID = profileSchema
+      .automaticallyBind ? UUID(uuidString: "00000000-0000-0000-0000-000000000000")! : uuid
     if let resolvedUUID, (try? findProfile(uuid: resolvedUUID)) != nil {
       throw OcaCoordinatorError.profileAlreadyExists
     }

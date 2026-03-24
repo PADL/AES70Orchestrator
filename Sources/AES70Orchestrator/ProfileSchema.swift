@@ -115,6 +115,9 @@ public struct OcaProfileObjectSchema: Sendable, CustomStringConvertible {
 
   public var isLeaf: Bool { !isContainer }
 
+  // if true, the remote object is locked when bound and unlocked when unbound
+  public let lockRemote: Bool
+
   public let actionObjectSchema: [Self]
 
   public var description: String {
@@ -127,12 +130,14 @@ public struct OcaProfileObjectSchema: Sendable, CustomStringConvertible {
     type: SwiftOCADevice.OcaRoot.Type,
     localObjectNumber: OcaONoMask? = nil,
     remoteObjectNumber: OcaONoMask,
+    lockRemote: Bool = false,
     actionObjectSchema: [Self] = []
   ) {
     self.role = role
     self.type = type
     self.localObjectNumber = localObjectNumber
     self.remoteObjectNumber = remoteObjectNumber
+    self.lockRemote = lockRemote
     self.actionObjectSchema = actionObjectSchema
   }
 

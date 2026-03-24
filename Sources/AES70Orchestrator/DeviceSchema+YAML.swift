@@ -146,11 +146,14 @@ extension OcaDeviceSchema {
       localObjectNumber = try OcaONoMask(oNoString)
     }
 
+    let lockRemote = props?["lockRemote"]?.bool ?? false
+
     return OcaProfileObjectSchema(
       role: role,
       type: type,
       localObjectNumber: localObjectNumber,
       remoteObjectNumber: remoteObjectNumber,
+      lockRemote: lockRemote,
       actionObjectSchema: actionObjects
     )
   }

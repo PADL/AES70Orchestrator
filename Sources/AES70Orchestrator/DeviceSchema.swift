@@ -16,6 +16,8 @@
 
 import SwiftOCA
 
+/// A top-level schema describing a device class, including the hardware models it targets
+/// and the profile schemas available for that device.
 public struct OcaDeviceSchema: Sendable, CustomStringConvertible {
   public let name: String
 

@@ -724,15 +724,15 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
       }
       let profile = try findProfile(uuid: uuid)
       return try encodeResponse(profile.objectNumber)
-    case OcaMethodID("3.9"): // ExportState() → OcaLongBlob
+    case OcaMethodID("3.9"): // Export() → OcaLongBlob
       try decodeNullCommand(command)
       try await ensureReadable(by: controller, command: command)
-      let blob = try await exportState()
+      let blob = try await export()
       return try encodeResponse(blob)
-    case OcaMethodID("3.10"): // ImportState(OcaLongBlob)
+    case OcaMethodID("3.10"): // Import(OcaLongBlob)
       let blob: OcaLongBlob = try decodeCommand(command)
       try await ensureWritable(by: controller, command: command)
-      try await importState(from: blob)
+      try await `import`(from: blob)
       return Ocp1Response()
     default:
       return try await super.handleCommand(command, from: controller)

@@ -582,12 +582,12 @@ struct PersistenceTests {
     let tempURL = FileManager.default.temporaryDirectory
       .appendingPathComponent(UUID().uuidString + ".zip")
     defer { try? FileManager.default.removeItem(at: tempURL) }
-    try await coordinator.save(to: tempURL)
+    try await coordinator.export(to: tempURL)
     #expect(FileManager.default.fileExists(atPath: tempURL.path))
 
     // create a fresh coordinator and load
     let (coordinator2, _device2) = try await CoordinatorTests._makeCoordinator()
-    try await coordinator2.load(from: tempURL)
+    try await coordinator2.import(from: tempURL)
 
     // verify profiles were restored
     let restored1 = try await coordinator2.findProfile(uuid: uuid1)
@@ -610,12 +610,12 @@ struct PersistenceTests {
     let tempURL = FileManager.default.temporaryDirectory
       .appendingPathComponent(UUID().uuidString + ".zip")
     defer { try? FileManager.default.removeItem(at: tempURL) }
-    try await coordinator.save(to: tempURL)
+    try await coordinator.export(to: tempURL)
     #expect(FileManager.default.fileExists(atPath: tempURL.path))
 
     // load into fresh coordinator — should succeed with no profiles
     let (coordinator2, _device2) = try await CoordinatorTests._makeCoordinator()
-    try await coordinator2.load(from: tempURL)
+    try await coordinator2.import(from: tempURL)
   }
 
   @Test
@@ -639,10 +639,10 @@ struct PersistenceTests {
     let tempURL = FileManager.default.temporaryDirectory
       .appendingPathComponent(UUID().uuidString + ".zip")
     defer { try? FileManager.default.removeItem(at: tempURL) }
-    try await coordinator.save(to: tempURL)
+    try await coordinator.export(to: tempURL)
 
     let (coordinator2, _device2) = try await CoordinatorTests._makeCoordinator()
-    try await coordinator2.load(from: tempURL)
+    try await coordinator2.import(from: tempURL)
 
     let restored = try await coordinator2.findProfile(uuid: uuid)
     #expect(await restored.boundDevices.count == 2)
@@ -662,10 +662,10 @@ struct PersistenceTests {
     let tempURL = FileManager.default.temporaryDirectory
       .appendingPathComponent(UUID().uuidString + ".zip")
     defer { try? FileManager.default.removeItem(at: tempURL) }
-    try await coordinator.save(to: tempURL)
+    try await coordinator.export(to: tempURL)
 
     let (coordinator2, _device2) = try await CoordinatorTests._makeCoordinator()
-    try await coordinator2.load(from: tempURL)
+    try await coordinator2.import(from: tempURL)
 
     let restored = try await coordinator2.findProfile(uuid: uuid)
     #expect(await restored.proxyBlock != nil)
@@ -687,11 +687,11 @@ struct PersistenceTests {
     let profile = try await coordinator.findProfile(uuid: uuid)
     try await coordinator.bindProfile(profile, to: Self._testDeviceIdentifier)
 
-    let blob = try await coordinator.exportState()
+    let blob = try await coordinator.export()
     #expect(blob.wrappedValue.count > 0)
 
     let (coordinator2, _device2) = try await CoordinatorTests._makeCoordinator()
-    try await coordinator2.importState(from: blob)
+    try await coordinator2.import(from: blob)
 
     let restored = try await coordinator2.findProfile(uuid: uuid)
     #expect(await restored.label == "BlobTest")

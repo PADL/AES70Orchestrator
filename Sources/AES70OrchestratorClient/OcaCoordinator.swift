@@ -146,11 +146,11 @@ open class OcaCoordinator: SwiftOCA.OcaManager, @unchecked Sendable {
 
   // MARK: - State import/export
 
-  public func exportState() async throws -> OcaLongBlob {
+  public func export() async throws -> OcaLongBlob {
     try await sendCommandRrq(methodID: OcaMethodID("3.9"))
   }
 
-  public func importState(from blob: OcaLongBlob) async throws {
+  public func `import`(from blob: OcaLongBlob) async throws {
     try await sendCommandRrq(
       methodID: OcaMethodID("3.10"),
       parameters: blob

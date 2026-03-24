@@ -105,7 +105,7 @@ enum ExampleOrchestrator {
     )
 
     if FileManager.default.fileExists(atPath: stateURL.path) {
-      try await coordinator.load(from: stateURL)
+      try await coordinator.import(from: stateURL)
       print("Loaded state from \(stateFile)")
     } else {
       let profileONo = try await coordinator.addProfile(

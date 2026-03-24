@@ -148,7 +148,7 @@ extension OcaCoordinator {
     }
   }
 
-  public func save(to url: URL) async throws {
+  public func export(to url: URL) async throws {
     let tempURL = url.appendingPathExtension(UUID().uuidString)
     let archive = try Archive(url: tempURL, accessMode: .create)
     try await _save(to: archive)
@@ -156,13 +156,13 @@ extension OcaCoordinator {
     logger.debug("Saved state to \(url.path)")
   }
 
-  public func load(from url: URL) async throws {
+  public func `import`(from url: URL) async throws {
     let archive = try Archive(url: url, accessMode: .read)
     try await _load(from: archive)
     logger.debug("Loaded state from \(url.path)")
   }
 
-  public func exportState() async throws -> OcaLongBlob {
+  public func export() async throws -> OcaLongBlob {
     let archive = try Archive(data: Data(), accessMode: .create)
     try await _save(to: archive)
     guard let data = archive.data else {
@@ -174,7 +174,7 @@ extension OcaCoordinator {
     return blob
   }
 
-  public func importState(from blob: OcaLongBlob) async throws {
+  public func `import`(from blob: OcaLongBlob) async throws {
     let archive = try Archive(data: blob.wrappedValue, accessMode: .read)
     try await _load(from: archive)
     logger.debug("Loaded state from blob (\(blob.wrappedValue.count) bytes)")
@@ -189,7 +189,7 @@ extension OcaCoordinator {
       guard let self else { return }
       for await _ in events.debounce(for: debounceInterval) {
         do {
-          try await save(to: url)
+          try await export(to: url)
         } catch {
           logger.warning("Persistence monitor: failed to save: \(error)")
         }

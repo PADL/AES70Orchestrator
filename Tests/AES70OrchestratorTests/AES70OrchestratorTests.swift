@@ -19,62 +19,72 @@ import FoundationEssentials
 #else
 import Foundation
 #endif
-import Testing
 @testable import AES70Orchestrator
+import Testing
 @testable @_spi(SwiftOCAPrivate) import SwiftOCA
 @testable @_spi(SwiftOCAPrivate) import SwiftOCADevice
 
 // MARK: - OcaONoMask tests
 
-@Suite struct OcaONoMaskTests {
-  @Test func initFromString() throws {
+@Suite
+struct OcaONoMaskTests {
+  @Test
+  func initFromString() throws {
     let mask = try OcaONoMask("0x80000000/0x00010000")
-    #expect(mask.oNo == 0x80000000)
-    #expect(mask.mask == 0x00010000)
+    #expect(mask.oNo == 0x8000_0000)
+    #expect(mask.mask == 0x0001_0000)
   }
 
-  @Test func initFromStringZeroMask() throws {
+  @Test
+  func initFromStringZeroMask() throws {
     let mask = try OcaONoMask("0x00002710/0x00000000")
-    #expect(mask.oNo == 0x00002710)
+    #expect(mask.oNo == 0x0000_2710)
     #expect(mask.mask == 0)
   }
 
-  @Test func initFromStringInvalidThrows() {
+  @Test
+  func initFromStringInvalidThrows() {
     #expect(throws: OcaCoordinatorError.self) {
       try OcaONoMask("invalid")
     }
   }
 
-  @Test func instanceCountWithContiguousMask() {
+  @Test
+  func instanceCountWithContiguousMask() {
     let mask = OcaONoMask(oNo: 0x100, mask: 0x0F)
     #expect(mask.instanceCount == 4)
   }
 
-  @Test func instanceCountWithShiftedMask() {
+  @Test
+  func instanceCountWithShiftedMask() {
     let mask = OcaONoMask(oNo: 0x100, mask: 0x30)
     #expect(mask.instanceCount == 2)
   }
 
-  @Test func instanceCountZeroMask() {
+  @Test
+  func instanceCountZeroMask() {
     let mask = OcaONoMask(oNo: 0x100, mask: 0)
     #expect(mask.instanceCount == 0)
   }
 
-  @Test func objectNumberForIndex() throws {
+  @Test
+  func objectNumberForIndex() throws {
     let mask = OcaONoMask(oNo: 0x100, mask: 0x0F)
     #expect(try mask.objectNumber(for: 0) == 0x100)
     #expect(try mask.objectNumber(for: 1) == 0x101)
     #expect(try mask.objectNumber(for: 15) == 0x10F)
   }
 
-  @Test func objectNumberForShiftedIndex() throws {
+  @Test
+  func objectNumberForShiftedIndex() throws {
     let mask = OcaONoMask(oNo: 0x100, mask: 0xF0)
     #expect(try mask.objectNumber(for: 0) == 0x100)
     #expect(try mask.objectNumber(for: 1) == 0x110)
     #expect(try mask.objectNumber(for: 15) == 0x1F0)
   }
 
-  @Test func objectNumberOverflowThrows() {
+  @Test
+  func objectNumberOverflowThrows() {
     let mask = OcaONoMask(oNo: 0x100, mask: 0x03)
     #expect(throws: OcaCoordinatorError.self) {
       try mask.objectNumber(for: 4)
@@ -84,8 +94,10 @@ import Testing
 
 // MARK: - OcaProfileObjectSchema tests
 
-@Suite struct OcaProfileObjectSchemaTests {
-  @Test func leafSchema() {
+@Suite
+struct OcaProfileObjectSchemaTests {
+  @Test
+  func leafSchema() {
     let schema = OcaProfileObjectSchema(
       role: "Gain",
       type: SwiftOCADevice.OcaGain.self,
@@ -97,7 +109,8 @@ import Testing
     #expect(schema.actionObjectSchema.isEmpty)
   }
 
-  @Test func containerSchema() {
+  @Test
+  func containerSchema() {
     let child = OcaProfileObjectSchema(
       role: "Mute",
       type: SwiftOCADevice.OcaMute.self,
@@ -114,7 +127,8 @@ import Testing
     #expect(block.actionObjectSchema.count == 1)
   }
 
-  @Test func applyRecursiveVisitsAllNodes() async throws {
+  @Test
+  func applyRecursiveVisitsAllNodes() async throws {
     let child1 = OcaProfileObjectSchema(
       role: "Gain",
       type: SwiftOCADevice.OcaGain.self,
@@ -149,8 +163,10 @@ import Testing
 
 // MARK: - OcaProfileSchema tests
 
-@Suite struct OcaProfileSchemaTests {
-  @Test func minimumRemoteObjectCount() {
+@Suite
+struct OcaProfileSchemaTests {
+  @Test
+  func minimumRemoteObjectCount() {
     let block1 = OcaProfileObjectSchema(
       role: "Block1",
       type: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>.self,
@@ -169,8 +185,10 @@ import Testing
 
 // MARK: - OcaDeviceSchema tests
 
-@Suite struct OcaDeviceSchemaTests {
-  @Test func memberwise() {
+@Suite
+struct OcaDeviceSchemaTests {
+  @Test
+  func memberwise() {
     let profileSchema = OcaProfileSchema(name: "gain", blocks: [])
     let deviceSchema = OcaDeviceSchema(
       name: "TestDevice",
@@ -185,7 +203,8 @@ import Testing
 
 // MARK: - Coordinator profile lifecycle tests
 
-@Suite struct CoordinatorTests {
+@Suite
+struct CoordinatorTests {
   static func _makeTestSchema() -> OcaDeviceSchema {
     let gainSchema = OcaProfileObjectSchema(
       role: "Gain",
@@ -240,20 +259,23 @@ import Testing
     return (coordinator, device)
   }
 
-  @Test func addProfile() async throws {
+  @Test
+  func addProfile() async throws {
     let (coordinator, _device) = try await Self._makeCoordinator()
     let oNo = try await coordinator.addProfile(schema: "ChannelStrip", name: "My Channel")
     #expect(oNo != 0)
   }
 
-  @Test func addProfileInvalidSchemaThrows() async throws {
+  @Test
+  func addProfileInvalidSchemaThrows() async throws {
     let (coordinator, _device) = try await Self._makeCoordinator()
     await #expect(throws: OcaCoordinatorError.self) {
       try await coordinator.addProfile(schema: "NonExistent")
     }
   }
 
-  @Test func addMultipleProfilesDifferentSchemas() async throws {
+  @Test
+  func addMultipleProfilesDifferentSchemas() async throws {
     let (coordinator, _device) = try await Self._makeCoordinator()
     let oNo1 = try await coordinator.addProfile(schema: "ChannelStrip", name: "Ch1")
     let oNo2 = try await coordinator.addProfile(schema: "SimpleSwitch", name: "Sw1")
@@ -263,23 +285,26 @@ import Testing
     #expect(oNo2 != oNo3)
   }
 
-  @Test func findProfileByUUID() async throws {
+  @Test
+  func findProfileByUUID() async throws {
     let (coordinator, _device) = try await Self._makeCoordinator()
     let oNo = try await coordinator.addProfile(schema: "ChannelStrip")
     let profile = try await coordinator._findProfile(oNo: oNo)
-    let uuid = UUID(uuidString: await profile.role)!
+    let uuid = await UUID(uuidString: profile.role)!
     let found = try await coordinator.findProfile(uuid: uuid)
     #expect(await found.objectNumber == oNo)
   }
 
-  @Test func findProfileByName() async throws {
+  @Test
+  func findProfileByName() async throws {
     let (coordinator, _device) = try await Self._makeCoordinator()
     _ = try await coordinator.addProfile(schema: "ChannelStrip", name: "TestProfile")
     let found = try await coordinator.findProfile(named: "TestProfile", schema: "ChannelStrip")
     #expect(await found.label == "TestProfile")
   }
 
-  @Test func findProfileByNameWrongSchemaThrows() async throws {
+  @Test
+  func findProfileByNameWrongSchemaThrows() async throws {
     let (coordinator, _device) = try await Self._makeCoordinator()
     _ = try await coordinator.addProfile(schema: "ChannelStrip", name: "TestProfile")
     await #expect(throws: OcaCoordinatorError.self) {
@@ -287,7 +312,8 @@ import Testing
     }
   }
 
-  @Test func duplicateNamesAcrossSchemas() async throws {
+  @Test
+  func duplicateNamesAcrossSchemas() async throws {
     let (coordinator, _device) = try await Self._makeCoordinator()
     let oNo1 = try await coordinator.addProfile(schema: "ChannelStrip", name: "Shared")
     let oNo2 = try await coordinator.addProfile(schema: "SimpleSwitch", name: "Shared")
@@ -298,18 +324,20 @@ import Testing
     #expect(await p2.objectNumber == oNo2)
   }
 
-  @Test func deleteProfileByUUID() async throws {
+  @Test
+  func deleteProfileByUUID() async throws {
     let (coordinator, _device) = try await Self._makeCoordinator()
     let oNo = try await coordinator.addProfile(schema: "ChannelStrip", name: "ToDelete")
     let profile = try await coordinator._findProfile(oNo: oNo)
-    let uuid = UUID(uuidString: await profile.role)!
+    let uuid = await UUID(uuidString: profile.role)!
     try await coordinator.deleteProfile(uuid: uuid)
     await #expect(throws: OcaCoordinatorError.self) {
       try await coordinator.findProfile(uuid: uuid)
     }
   }
 
-  @Test func deleteProfileByName() async throws {
+  @Test
+  func deleteProfileByName() async throws {
     let (coordinator, _device) = try await Self._makeCoordinator()
     _ = try await coordinator.addProfile(schema: "ChannelStrip", name: "ToDelete")
     try await coordinator.deleteProfile(named: "ToDelete", schema: "ChannelStrip")
@@ -318,7 +346,8 @@ import Testing
     }
   }
 
-  @Test func profileONoAllocationIsSequential() async throws {
+  @Test
+  func profileONoAllocationIsSequential() async throws {
     let (coordinator, _device) = try await Self._makeCoordinator()
     let oNo1 = try await coordinator.addProfile(schema: "ChannelStrip")
     let oNo2 = try await coordinator.addProfile(schema: "ChannelStrip")
@@ -328,7 +357,8 @@ import Testing
     #expect(oNo3 == oNo2 + 2)
   }
 
-  @Test func profileIndexIsPerSchema() async throws {
+  @Test
+  func profileIndexIsPerSchema() async throws {
     let (coordinator, _device) = try await Self._makeCoordinator()
     let oNo1 = try await coordinator.addProfile(schema: "ChannelStrip")
     let oNo2 = try await coordinator.addProfile(schema: "SimpleSwitch")
@@ -338,7 +368,8 @@ import Testing
     #expect(await p2.profileIndex == 0)
   }
 
-  @Test func profileLocalObjectsCreated() async throws {
+  @Test
+  func profileLocalObjectsCreated() async throws {
     let (coordinator, _device) = try await Self._makeCoordinator()
     let oNo = try await coordinator.addProfile(schema: "ChannelStrip")
     let profile = try await coordinator._findProfile(oNo: oNo)
@@ -354,7 +385,8 @@ import Testing
 
 // MARK: - Persistence tests
 
-@Suite struct PersistenceTests {
+@Suite
+struct PersistenceTests {
   static let _testDeviceIdentifier = OcaConnectionBroker.DeviceIdentifier(
     serviceType: .tcp,
     modelGUID: OcaModelGUID(mfrCode: .init((0, 0, 0)), modelCode: (1, 2, 3, 4)),
@@ -362,7 +394,8 @@ import Testing
     name: "Test"
   )
 
-  @Test func saveAndLoadRoundTrip() async throws {
+  @Test
+  func saveAndLoadRoundTrip() async throws {
     let (coordinator, _device) = try await CoordinatorTests._makeCoordinator()
 
     // add profiles with specific UUIDs
@@ -400,7 +433,8 @@ import Testing
     #expect(await restored1.deviceIndices[Self._testDeviceIdentifier] != nil)
   }
 
-  @Test func saveEmptyCoordinator() async throws {
+  @Test
+  func saveEmptyCoordinator() async throws {
     let (coordinator, _device) = try await CoordinatorTests._makeCoordinator()
 
     let tempURL = FileManager.default.temporaryDirectory
@@ -414,7 +448,8 @@ import Testing
     try await coordinator2.load(from: tempURL)
   }
 
-  @Test func saveAndLoadMultipleBindings() async throws {
+  @Test
+  func saveAndLoadMultipleBindings() async throws {
     let (coordinator, _device) = try await CoordinatorTests._makeCoordinator()
 
     let uuid = UUID()
@@ -445,7 +480,8 @@ import Testing
     #expect(await restored.boundDevices.contains(device2.id))
   }
 
-  @Test func saveAndLoadPreservesProxyBlock() async throws {
+  @Test
+  func saveAndLoadPreservesProxyBlock() async throws {
     let (coordinator, _device) = try await CoordinatorTests._makeCoordinator()
 
     let uuid = UUID()
@@ -472,7 +508,8 @@ import Testing
     #expect(await restored.objectBinding(for: muteONo) != nil)
   }
 
-  @Test func blobSaveAndLoadRoundTrip() async throws {
+  @Test
+  func blobSaveAndLoadRoundTrip() async throws {
     let (coordinator, _device) = try await CoordinatorTests._makeCoordinator()
 
     let uuid = UUID()
@@ -496,63 +533,65 @@ import Testing
 
 // MARK: - YAML schema parsing tests
 
-@Suite struct YAMLSchemaTests {
+@Suite
+struct YAMLSchemaTests {
   static let _minimalYAML = """
-    device:
-      name: TestDevice
-      profiles:
-        - SimpleGain:
-          - Gain:
-              classID: 1.1.1.5
-              match: 0x00000200/0x0000000F
-              objectNumber: 0x00002000/0x000000F0
-    """
+  device:
+    name: TestDevice
+    profiles:
+      - SimpleGain:
+        - Gain:
+            classID: 1.1.1.5
+            match: 0x00000200/0x0000000F
+            objectNumber: 0x00002000/0x000000F0
+  """
 
   static let _nestedYAML = """
-    device:
-      name: NestedDevice
-      profiles:
-        - Channel:
-          - ChannelBlock:
-              classID: 1.1.3
-              match: 0x00000100/0x0000000F
-              objectNumber: 0x00001000/0x000000F0
-              actionObjects:
-                - Mute:
-                    classID: 1.1.1.2
-                    match: 0x00000300/0x0000000F
-                    objectNumber: 0x00003000/0x000000F0
-                - Gain:
-                    classID: 1.1.1.5
-                    match: 0x00000200/0x0000000F
-                    objectNumber: 0x00002000/0x000000F0
-    """
+  device:
+    name: NestedDevice
+    profiles:
+      - Channel:
+        - ChannelBlock:
+            classID: 1.1.3
+            match: 0x00000100/0x0000000F
+            objectNumber: 0x00001000/0x000000F0
+            actionObjects:
+              - Mute:
+                  classID: 1.1.1.2
+                  match: 0x00000300/0x0000000F
+                  objectNumber: 0x00003000/0x000000F0
+              - Gain:
+                  classID: 1.1.1.5
+                  match: 0x00000200/0x0000000F
+                  objectNumber: 0x00002000/0x000000F0
+  """
 
   static let _inferredBlockYAML = """
-    device:
-      name: InferredDevice
-      profiles:
-        - TestProfile:
-          - Container:
-              match: 0x00000100/0x0000000F
-              actionObjects:
-                - Gain:
-                    classID: 1.1.1.5
-                    match: 0x00000200/0x0000000F
-    """
+  device:
+    name: InferredDevice
+    profiles:
+      - TestProfile:
+        - Container:
+            match: 0x00000100/0x0000000F
+            actionObjects:
+              - Gain:
+                  classID: 1.1.1.5
+                  match: 0x00000200/0x0000000F
+  """
 
   static let _modelsYAML = """
-    device:
-      name: ModelDevice
-      models: [ 0x0AE91B00010100 ]
-      profiles:
-        - Simple:
-          - Gain:
-              classID: 1.1.1.5
-              match: 0x00000200/0x0000000F
-    """
+  device:
+    name: ModelDevice
+    models: [ 0x0AE91B00010100 ]
+    profiles:
+      - Simple:
+        - Gain:
+            classID: 1.1.1.5
+            match: 0x00000200/0x0000000F
+  """
 
-  @Test func parseMinimalSchema() async throws {
+  @Test
+  func parseMinimalSchema() async throws {
     let schema = try await OcaDeviceSchema(yaml: Self._minimalYAML)
     #expect(schema.name == "TestDevice")
     #expect(schema.models == nil)
@@ -568,7 +607,8 @@ import Testing
     #expect(gain.isLeaf)
   }
 
-  @Test func parseNestedSchema() async throws {
+  @Test
+  func parseNestedSchema() async throws {
     let schema = try await OcaDeviceSchema(yaml: Self._nestedYAML)
     #expect(schema.name == "NestedDevice")
     #expect(schema.profileSchemas.count == 1)
@@ -583,7 +623,8 @@ import Testing
     #expect(block.actionObjectSchema[1].type == SwiftOCADevice.OcaGain.self)
   }
 
-  @Test func parseInferredBlockType() async throws {
+  @Test
+  func parseInferredBlockType() async throws {
     let schema = try await OcaDeviceSchema(yaml: Self._inferredBlockYAML)
     let block = schema.profileSchemas[0].blocks[0]
     #expect(block.isContainer)
@@ -592,7 +633,8 @@ import Testing
     #expect(block.actionObjectSchema.count == 1)
   }
 
-  @Test func parseModels() async throws {
+  @Test
+  func parseModels() async throws {
     let schema = try await OcaDeviceSchema(yaml: Self._modelsYAML)
     #expect(schema.models != nil)
     #expect(schema.models?.count == 1)
@@ -601,27 +643,30 @@ import Testing
     #expect(model.modelCode == (0x00, 0x01, 0x01, 0x00))
   }
 
-  @Test func parseMissingDeviceKeyThrows() async {
+  @Test
+  func parseMissingDeviceKeyThrows() async {
     await #expect(throws: OcaCoordinatorError.self) {
       try await OcaDeviceSchema(yaml: "foo: bar")
     }
   }
 
-  @Test func parseMissingProfilesThrows() async {
+  @Test
+  func parseMissingProfilesThrows() async {
     await #expect(throws: OcaCoordinatorError.self) {
       try await OcaDeviceSchema(yaml: "device:\n  name: X")
     }
   }
 
-  @Test func parseMissingMatchThrows() async {
+  @Test
+  func parseMissingMatchThrows() async {
     let yaml = """
-      device:
-        name: Bad
-        profiles:
-          - P:
-            - Obj:
-                classID: 1.1.1.5
-      """
+    device:
+      name: Bad
+      profiles:
+        - P:
+          - Obj:
+              classID: 1.1.1.5
+    """
     await #expect(throws: OcaCoordinatorError.self) {
       try await OcaDeviceSchema(yaml: yaml)
     }

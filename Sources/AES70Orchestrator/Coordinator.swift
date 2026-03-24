@@ -304,7 +304,6 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
       schema: schema,
       coordinator: self
     )
-    if let name { profile.label = name }
     let proxyBlock = try await SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>(
       objectNumber: proxyBlockONo,
       lockable: false,
@@ -312,6 +311,7 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
       deviceDelegate: device,
       addToRootBlock: false
     )
+    if let name { proxyBlock.label = name }
     try await profile.createLocalObjects(proxyBlock: proxyBlock)
     try await entry.proxies.add(actionObject: proxyBlock)
     try await entry.profiles.add(actionObject: profile)

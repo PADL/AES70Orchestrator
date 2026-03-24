@@ -78,7 +78,11 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
   var deviceIndices = [SwiftOCA.OcaConnectionBroker.DeviceIdentifier: OcaONo]()
 
   // the proxy block in the "Profile Proxies" hierarchy for this profile's local objects
-  var proxyBlock: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>?
+  var proxyBlock: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>? {
+    didSet { _startLabelMonitor() }
+  }
+
+  private var _labelMonitorTask: Task<(), Never>?
 
   // maps local device object numbers to their bindings for efficient event dispatch
   private var objectBindings = [OcaONo: any OcaObjectBindingRepresentable]()
@@ -112,7 +116,42 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     }
   }
 
-  // to allow for renames, we identify a profile by a UUID, where the label can be changed
+  override public func handleCommand(
+    _ command: Ocp1Command,
+    from controller: any OcaController
+  ) async throws -> Ocp1Response {
+    switch command.methodID {
+    case OcaMethodID("2.2"):
+      // label is read-only on the profile; set it on the proxy block instead
+      throw Ocp1Error.status(.permissionDenied)
+    default:
+      return try await super.handleCommand(command, from: controller)
+    }
+  }
+
+  private func _startLabelMonitor() {
+    _labelMonitorTask?.cancel()
+    guard let proxyBlock else {
+      _labelMonitorTask = nil
+      return
+    }
+    // sync initial label from profile to proxy block
+    if !label.isEmpty {
+      proxyBlock.label = label
+    } else if !proxyBlock.label.isEmpty {
+      label = proxyBlock.label
+    }
+    _labelMonitorTask = Task { [weak self] in
+      do {
+        for try await newLabel in proxyBlock.$label {
+          guard let self, !Task.isCancelled else { break }
+          if label != newLabel {
+            label = newLabel
+          }
+        }
+      } catch {}
+    }
+  }
 
   var profileSchema: OcaProfileSchema {
     get throws {
@@ -186,6 +225,10 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
       try await device?.deregister(objectNumber: oNo)
     }
     objectBindings.removeAll()
+  }
+
+  deinit {
+    _labelMonitorTask?.cancel()
   }
 
   required init(from decoder: Decoder) throws {

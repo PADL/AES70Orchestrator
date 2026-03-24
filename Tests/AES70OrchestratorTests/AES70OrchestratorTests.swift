@@ -305,8 +305,9 @@ import Testing
     let oNo1 = try await coordinator.addProfile(schema: "ChannelStrip")
     let oNo2 = try await coordinator.addProfile(schema: "ChannelStrip")
     let oNo3 = try await coordinator.addProfile(schema: "SimpleSwitch")
-    #expect(oNo2 == oNo1 + 1)
-    #expect(oNo3 == oNo2 + 1)
+    // each addProfile allocates 2 ONos: one for the profile, one for its proxy block
+    #expect(oNo2 == oNo1 + 2)
+    #expect(oNo3 == oNo2 + 2)
   }
 
   @Test func profileIndexIsPerSchema() async throws {
@@ -330,5 +331,126 @@ import Testing
     #expect(await profile.objectBinding(for: blockONo) != nil)
     #expect(await profile.objectBinding(for: gainONo) != nil)
     #expect(await profile.objectBinding(for: muteONo) != nil)
+  }
+}
+
+// MARK: - Persistence tests
+
+@Suite struct PersistenceTests {
+  static let _testDeviceIdentifier = OcaConnectionBroker.DeviceIdentifier(
+    serviceType: .tcp,
+    modelGUID: OcaModelGUID(mfrCode: .init((0, 0, 0)), modelCode: (1, 2, 3, 4)),
+    serialNumber: "TestDevice-001",
+    name: "Test"
+  )
+
+  @Test func saveAndLoadRoundTrip() async throws {
+    let (coordinator, _device) = try await CoordinatorTests._makeCoordinator()
+
+    // add profiles with specific UUIDs
+    let uuid1 = UUID()
+    let uuid2 = UUID()
+    _ = try await coordinator.addProfile(schema: "ChannelStrip", name: "Ch1", uuid: uuid1)
+    _ = try await coordinator.addProfile(schema: "SimpleSwitch", name: "Sw1", uuid: uuid2)
+
+    // bind a device to the first profile
+    let profile1 = try await coordinator.findProfile(uuid: uuid1)
+    try await coordinator.bindProfile(profile1, to: Self._testDeviceIdentifier)
+
+    // save
+    let tempURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent(UUID().uuidString + ".zip")
+    defer { try? FileManager.default.removeItem(at: tempURL) }
+    try await coordinator.save(to: tempURL)
+    #expect(FileManager.default.fileExists(atPath: tempURL.path))
+
+    // create a fresh coordinator and load
+    let (coordinator2, _device2) = try await CoordinatorTests._makeCoordinator()
+    try await coordinator2.load(from: tempURL)
+
+    // verify profiles were restored
+    let restored1 = try await coordinator2.findProfile(uuid: uuid1)
+    #expect(await restored1.label == "Ch1")
+    #expect(await restored1.schema == "ChannelStrip")
+
+    let restored2 = try await coordinator2.findProfile(uuid: uuid2)
+    #expect(await restored2.label == "Sw1")
+    #expect(await restored2.schema == "SimpleSwitch")
+
+    // verify binding was restored
+    #expect(await restored1.boundDevices.contains(Self._testDeviceIdentifier.id))
+    #expect(await restored1.deviceIndices[Self._testDeviceIdentifier] != nil)
+  }
+
+  @Test func saveEmptyCoordinator() async throws {
+    let (coordinator, _device) = try await CoordinatorTests._makeCoordinator()
+
+    let tempURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent(UUID().uuidString + ".zip")
+    defer { try? FileManager.default.removeItem(at: tempURL) }
+    try await coordinator.save(to: tempURL)
+    #expect(FileManager.default.fileExists(atPath: tempURL.path))
+
+    // load into fresh coordinator — should succeed with no profiles
+    let (coordinator2, _device2) = try await CoordinatorTests._makeCoordinator()
+    try await coordinator2.load(from: tempURL)
+  }
+
+  @Test func saveAndLoadMultipleBindings() async throws {
+    let (coordinator, _device) = try await CoordinatorTests._makeCoordinator()
+
+    let uuid = UUID()
+    _ = try await coordinator.addProfile(schema: "ChannelStrip", name: "Multi", uuid: uuid)
+    let profile = try await coordinator.findProfile(uuid: uuid)
+
+    let device1 = Self._testDeviceIdentifier
+    let device2 = OcaConnectionBroker.DeviceIdentifier(
+      serviceType: .tcp,
+      modelGUID: OcaModelGUID(mfrCode: .init((0, 0, 0)), modelCode: (5, 6, 7, 8)),
+      serialNumber: "TestDevice-002",
+      name: "Test2"
+    )
+    try await coordinator.bindProfile(profile, to: device1)
+    try await coordinator.bindProfile(profile, to: device2)
+
+    let tempURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent(UUID().uuidString + ".zip")
+    defer { try? FileManager.default.removeItem(at: tempURL) }
+    try await coordinator.save(to: tempURL)
+
+    let (coordinator2, _device2) = try await CoordinatorTests._makeCoordinator()
+    try await coordinator2.load(from: tempURL)
+
+    let restored = try await coordinator2.findProfile(uuid: uuid)
+    #expect(await restored.boundDevices.count == 2)
+    #expect(await restored.boundDevices.contains(device1.id))
+    #expect(await restored.boundDevices.contains(device2.id))
+  }
+
+  @Test func saveAndLoadPreservesProxyBlock() async throws {
+    let (coordinator, _device) = try await CoordinatorTests._makeCoordinator()
+
+    let uuid = UUID()
+    _ = try await coordinator.addProfile(schema: "ChannelStrip", name: "WithProxy", uuid: uuid)
+    let profile = try await coordinator.findProfile(uuid: uuid)
+    #expect(await profile.proxyBlock != nil)
+
+    let tempURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent(UUID().uuidString + ".zip")
+    defer { try? FileManager.default.removeItem(at: tempURL) }
+    try await coordinator.save(to: tempURL)
+
+    let (coordinator2, _device2) = try await CoordinatorTests._makeCoordinator()
+    try await coordinator2.load(from: tempURL)
+
+    let restored = try await coordinator2.findProfile(uuid: uuid)
+    #expect(await restored.proxyBlock != nil)
+    // verify local objects exist in the restored profile
+    let blockONo = try OcaONoMask(oNo: 0x1000, mask: 0x0F).objectNumber(for: 0)
+    let gainONo = try OcaONoMask(oNo: 0x2000, mask: 0x0F).objectNumber(for: 0)
+    let muteONo = try OcaONoMask(oNo: 0x3000, mask: 0x0F).objectNumber(for: 0)
+    #expect(await restored.objectBinding(for: blockONo) != nil)
+    #expect(await restored.objectBinding(for: gainONo) != nil)
+    #expect(await restored.objectBinding(for: muteONo) != nil)
   }
 }

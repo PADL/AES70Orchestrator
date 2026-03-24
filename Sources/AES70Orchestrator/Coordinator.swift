@@ -544,13 +544,9 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
     logger.debug("Unbound \(profile) from \(deviceIdentifier)")
   }
 
-  private static let _activationRetryDelay: Duration = .seconds(3)
-  private static let _maxActivationRetries = 5
-
   private func _activateProfile(
     _ profile: OcaProfile,
-    to deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier,
-    retryCount: Int = 0
+    to deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
   ) async {
     guard let index = profile.deviceIndices[deviceIdentifier] else { return }
     logger.debug("Activating \(profile) for \(deviceIdentifier)")
@@ -579,33 +575,6 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
       }
     } catch {
       logger.warning("Failed to connect to \(deviceIdentifier) for activation: \(error)")
-      _scheduleActivationRetry(
-        profile: profile,
-        deviceIdentifier: deviceIdentifier,
-        retryCount: retryCount
-      )
-    }
-  }
-
-  private func _scheduleActivationRetry(
-    profile: OcaProfile,
-    deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier,
-    retryCount: Int
-  ) {
-    guard retryCount < Self._maxActivationRetries else {
-      logger.warning("Exhausted activation retries for \(profile) to \(deviceIdentifier)")
-      return
-    }
-    let nextRetry = retryCount + 1
-    logger
-      .debug(
-        "Scheduling activation retry \(nextRetry)/\(Self._maxActivationRetries) for \(profile) to \(deviceIdentifier)"
-      )
-    Task { [weak self] in
-      try? await Task.sleep(for: Self._activationRetryDelay)
-      guard let self else { return }
-      guard profile.remoteObjectCount(for: deviceIdentifier) == 0 else { return }
-      await _activateProfile(profile, to: deviceIdentifier, retryCount: nextRetry)
     }
   }
 

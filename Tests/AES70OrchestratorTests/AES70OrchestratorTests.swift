@@ -27,6 +27,24 @@ import Testing
 // MARK: - OcaONoMask tests
 
 @Suite struct OcaONoMaskTests {
+  @Test func initFromString() throws {
+    let mask = try OcaONoMask("0x80000000/0x00010000")
+    #expect(mask.oNo == 0x80000000)
+    #expect(mask.mask == 0x00010000)
+  }
+
+  @Test func initFromStringZeroMask() throws {
+    let mask = try OcaONoMask("0x00002710/0x00000000")
+    #expect(mask.oNo == 0x00002710)
+    #expect(mask.mask == 0)
+  }
+
+  @Test func initFromStringInvalidThrows() {
+    #expect(throws: OcaCoordinatorError.self) {
+      try OcaONoMask("invalid")
+    }
+  }
+
   @Test func instanceCountWithContiguousMask() {
     let mask = OcaONoMask(oNo: 0x100, mask: 0x0F)
     #expect(mask.instanceCount == 4)
@@ -452,5 +470,139 @@ import Testing
     #expect(await restored.objectBinding(for: blockONo) != nil)
     #expect(await restored.objectBinding(for: gainONo) != nil)
     #expect(await restored.objectBinding(for: muteONo) != nil)
+  }
+}
+
+// MARK: - YAML schema parsing tests
+
+@Suite struct YAMLSchemaTests {
+  static let _minimalYAML = """
+    device:
+      name: TestDevice
+      profiles:
+        - SimpleGain:
+          - Gain:
+              classID: 1.1.1.5
+              match: 0x00000200/0x0000000F
+              objectNumber: 0x00002000/0x000000F0
+    """
+
+  static let _nestedYAML = """
+    device:
+      name: NestedDevice
+      profiles:
+        - Channel:
+          - ChannelBlock:
+              classID: 1.1.3
+              match: 0x00000100/0x0000000F
+              objectNumber: 0x00001000/0x000000F0
+              actionObjects:
+                - Mute:
+                    classID: 1.1.1.2
+                    match: 0x00000300/0x0000000F
+                    objectNumber: 0x00003000/0x000000F0
+                - Gain:
+                    classID: 1.1.1.5
+                    match: 0x00000200/0x0000000F
+                    objectNumber: 0x00002000/0x000000F0
+    """
+
+  static let _inferredBlockYAML = """
+    device:
+      name: InferredDevice
+      profiles:
+        - TestProfile:
+          - Container:
+              match: 0x00000100/0x0000000F
+              actionObjects:
+                - Gain:
+                    classID: 1.1.1.5
+                    match: 0x00000200/0x0000000F
+    """
+
+  static let _modelsYAML = """
+    device:
+      name: ModelDevice
+      models: [ 0x0AE91B00010100 ]
+      profiles:
+        - Simple:
+          - Gain:
+              classID: 1.1.1.5
+              match: 0x00000200/0x0000000F
+    """
+
+  @Test func parseMinimalSchema() async throws {
+    let schema = try await OcaDeviceSchema(yaml: Self._minimalYAML)
+    #expect(schema.name == "TestDevice")
+    #expect(schema.models == nil)
+    #expect(schema.profileSchemas.count == 1)
+    #expect(schema.profileSchemas[0].name == "SimpleGain")
+    #expect(schema.profileSchemas[0].blocks.count == 1)
+
+    let gain = schema.profileSchemas[0].blocks[0]
+    #expect(gain.role == "Gain")
+    #expect(gain.type == SwiftOCADevice.OcaGain.self)
+    #expect(gain.remoteObjectNumber == OcaONoMask(oNo: 0x200, mask: 0x0F))
+    #expect(gain.localObjectNumber == OcaONoMask(oNo: 0x2000, mask: 0xF0))
+    #expect(gain.isLeaf)
+  }
+
+  @Test func parseNestedSchema() async throws {
+    let schema = try await OcaDeviceSchema(yaml: Self._nestedYAML)
+    #expect(schema.name == "NestedDevice")
+    #expect(schema.profileSchemas.count == 1)
+
+    let block = schema.profileSchemas[0].blocks[0]
+    #expect(block.role == "ChannelBlock")
+    #expect(block.isContainer)
+    #expect(block.actionObjectSchema.count == 2)
+    #expect(block.actionObjectSchema[0].role == "Mute")
+    #expect(block.actionObjectSchema[0].type == SwiftOCADevice.OcaMute.self)
+    #expect(block.actionObjectSchema[1].role == "Gain")
+    #expect(block.actionObjectSchema[1].type == SwiftOCADevice.OcaGain.self)
+  }
+
+  @Test func parseInferredBlockType() async throws {
+    let schema = try await OcaDeviceSchema(yaml: Self._inferredBlockYAML)
+    let block = schema.profileSchemas[0].blocks[0]
+    #expect(block.isContainer)
+    #expect(block.type == SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>.self)
+    #expect(block.localObjectNumber == nil)
+    #expect(block.actionObjectSchema.count == 1)
+  }
+
+  @Test func parseModels() async throws {
+    let schema = try await OcaDeviceSchema(yaml: Self._modelsYAML)
+    #expect(schema.models != nil)
+    #expect(schema.models?.count == 1)
+    let model = schema.models![0]
+    #expect(model.mfrCode == OcaOrganizationID((0x0A, 0xE9, 0x1B)))
+    #expect(model.modelCode == (0x00, 0x01, 0x01, 0x00))
+  }
+
+  @Test func parseMissingDeviceKeyThrows() async {
+    await #expect(throws: OcaCoordinatorError.self) {
+      try await OcaDeviceSchema(yaml: "foo: bar")
+    }
+  }
+
+  @Test func parseMissingProfilesThrows() async {
+    await #expect(throws: OcaCoordinatorError.self) {
+      try await OcaDeviceSchema(yaml: "device:\n  name: X")
+    }
+  }
+
+  @Test func parseMissingMatchThrows() async {
+    let yaml = """
+      device:
+        name: Bad
+        profiles:
+          - P:
+            - Obj:
+                classID: 1.1.1.5
+      """
+    await #expect(throws: OcaCoordinatorError.self) {
+      try await OcaDeviceSchema(yaml: yaml)
+    }
   }
 }

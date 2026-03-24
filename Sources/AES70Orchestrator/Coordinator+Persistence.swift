@@ -51,12 +51,7 @@ extension OcaCoordinator {
     }
   }
 
-  public func save(to url: URL) async throws {
-    let tempURL = url.appendingPathExtension(UUID().uuidString)
-    guard let archive = Archive(url: tempURL, accessMode: .create) else {
-      throw OcaCoordinatorError.persistenceError
-    }
-
+  private func _save(to archive: Archive) async throws {
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
 
@@ -88,16 +83,9 @@ extension OcaCoordinator {
         )
       }
     }
-
-    _ = try FileManager.default.replaceItemAt(url, withItemAt: tempURL)
-    logger.debug("Saved state to \(url.path)")
   }
 
-  public func load(from url: URL) async throws {
-    guard let archive = Archive(url: url, accessMode: .read) else {
-      throw OcaCoordinatorError.persistenceError
-    }
-
+  private func _load(from archive: Archive) async throws {
     let decoder = JSONDecoder()
 
     for (schemaName, _) in _schemaEntries {
@@ -158,8 +146,42 @@ extension OcaCoordinator {
         logger.debug("Loaded profile \(uuidString) for schema \(schemaName)")
       }
     }
+  }
 
+  public func save(to url: URL) async throws {
+    let tempURL = url.appendingPathExtension(UUID().uuidString)
+    guard let archive = Archive(url: tempURL, accessMode: .create) else {
+      throw OcaCoordinatorError.persistenceError
+    }
+    try await _save(to: archive)
+    _ = try FileManager.default.replaceItemAt(url, withItemAt: tempURL)
+    logger.debug("Saved state to \(url.path)")
+  }
+
+  public func load(from url: URL) async throws {
+    guard let archive = Archive(url: url, accessMode: .read) else {
+      throw OcaCoordinatorError.persistenceError
+    }
+    try await _load(from: archive)
     logger.debug("Loaded state from \(url.path)")
+  }
+
+  public func save() async throws -> OcaLongBlob {
+    let archive = try Archive(data: Data(), accessMode: .create)
+    try await _save(to: archive)
+    guard let data = archive.data else {
+      throw OcaCoordinatorError.persistenceError
+    }
+    var blob = OcaLongBlob()
+    blob.wrappedValue = data
+    logger.debug("Saved state to blob (\(data.count) bytes)")
+    return blob
+  }
+
+  public func load(from blob: OcaLongBlob) async throws {
+    let archive = try Archive(data: blob.wrappedValue, accessMode: .read)
+    try await _load(from: archive)
+    logger.debug("Loaded state from blob (\(blob.wrappedValue.count) bytes)")
   }
 
   public func startPersistenceMonitor(

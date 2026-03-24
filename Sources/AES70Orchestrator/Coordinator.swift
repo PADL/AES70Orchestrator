@@ -40,6 +40,7 @@ public enum OcaCoordinatorError: Error {
   case deviceIndexExhausted
   case deviceIndexInvalid
   case persistenceError
+  case schemaParseError(String)
 }
 
 @OcaDevice

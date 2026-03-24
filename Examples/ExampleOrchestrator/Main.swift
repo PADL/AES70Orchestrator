@@ -37,36 +37,7 @@ private extension SocketAddress {
   }
 }
 
-// Schema matching SwiftOCA's Examples/OCADevice:
-//   Block (ONo 10000)
-//     BooleanActuator x8 (ONos 10010..10017)
-//     Gain (ONo 10020)
-
-let ocaDeviceSchema: OcaDeviceSchema = {
-  let booleanActuatorSchemas = (0..<8).map { index in
-    OcaProfileObjectSchema(
-      role: "Actuator\(index)",
-      type: SwiftOCADevice.OcaBooleanActuator.self,
-      localObjectNumber: OcaONoMask(oNo: OcaONo(0x2000 + index), mask: 0xF0),
-      remoteObjectNumber: OcaONoMask(oNo: OcaONo(10010 + index), mask: 0)
-    )
-  }
-  let gainSchema = OcaProfileObjectSchema(
-    role: "Gain",
-    type: SwiftOCADevice.OcaGain.self,
-    localObjectNumber: OcaONoMask(oNo: 0x2010, mask: 0xF0),
-    remoteObjectNumber: OcaONoMask(oNo: 10020, mask: 0)
-  )
-  let blockSchema = OcaProfileObjectSchema(
-    role: "Block",
-    type: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>.self,
-    localObjectNumber: OcaONoMask(oNo: 0x1000, mask: 0xF0),
-    remoteObjectNumber: OcaONoMask(oNo: 10000, mask: 0),
-    actionObjectSchema: booleanActuatorSchemas + [gainSchema]
-  )
-  let profileSchema = OcaProfileSchema(name: "OCADevice", blocks: [blockSchema])
-  return OcaDeviceSchema(name: "OCADevice", profileSchemas: [profileSchema])
-}()
+// Schema loaded from OCADevice.yaml, matching SwiftOCA's Examples/OCADevice
 
 @main
 enum ExampleOrchestrator {
@@ -110,6 +81,15 @@ enum ExampleOrchestrator {
       address: listenAddress.socketAddressData
     )
     #endif
+
+    guard let yamlURL = Bundle.module.url(
+      forResource: "OCADevice",
+      withExtension: "yaml"
+    ) else {
+      fatalError("OCADevice.yaml not found in bundle")
+    }
+    let yamlString = try String(contentsOf: yamlURL, encoding: .utf8)
+    let ocaDeviceSchema = try await OcaDeviceSchema(yaml: yamlString)
 
     let connectionOptions = Ocp1ConnectionOptions(
       flags: [.automaticReconnect, .refreshDeviceTreeOnConnection]

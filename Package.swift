@@ -52,6 +52,9 @@ let package = Package(
               .product(name: "AsyncAlgorithms", package: "swift-async-algorithms"),
             ],
             path: "Examples/ExampleOrchestrator",
+            resources: [
+              .copy("Resources/OCADevice.yaml"),
+            ],
             swiftSettings: [
               .enableExperimentalFeature("StrictConcurrency"),
               .enableExperimentalFeature("NonisolatedNonsendingByDefault"),
@@ -64,6 +67,10 @@ let package = Package(
               .product(name: "SwiftOCA", package: "SwiftOCA"),
               .product(name: "SwiftOCADevice", package: "SwiftOCA"),
             ],
+            swiftSettings: [
+              .enableExperimentalFeature("StrictConcurrency"),
+              .enableExperimentalFeature("NonisolatedNonsendingByDefault"),
+            ]
         ),
     ]
 )

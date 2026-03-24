@@ -38,6 +38,21 @@ public struct OcaONoMask: Sendable, Equatable, CustomStringConvertible {
     "0x\(String(oNo, radix: 16))/0x\(String(mask, radix: 16))"
   }
 
+  public init(_ string: String) throws {
+    let parts = string.split(separator: "/")
+    guard parts.count == 2 else {
+      throw OcaCoordinatorError.schemaParseError("invalid OcaONoMask format: \(string)")
+    }
+    guard let oNo = OcaONo(parts[0].dropFirst(2), radix: 16) else {
+      throw OcaCoordinatorError.schemaParseError("invalid oNo hex value: \(parts[0])")
+    }
+    guard let mask = OcaONo(parts[1].dropFirst(2), radix: 16) else {
+      throw OcaCoordinatorError.schemaParseError("invalid mask hex value: \(parts[1])")
+    }
+    self.oNo = oNo
+    self.mask = mask
+  }
+
   func objectNumber(for index: OcaONo) throws -> OcaONo {
     guard index < (1 << instanceCount) else {
       throw OcaCoordinatorError.profileONoAllocationExhausted

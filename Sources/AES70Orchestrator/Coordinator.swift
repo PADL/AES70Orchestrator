@@ -27,6 +27,9 @@ import SwiftOCADevice
 let PADLCompanyID = OcaOrganizationID((0x0A, 0xE9, 0x1B))
 
 public let OcaCoordinatorONo = OcaONo(1024)
+// locally created objects must use object numbers below this to avoid conflicting with device
+// object numbers
+let ReservedONoLimit = OcaONo(4096)
 // FIXME: in order to not conflict with device ONo space we are going to use the reserved ONos
 let ProfilesContainerONo = OcaONo(1025)
 let ProfileProxiesContainerONo = OcaONo(1026)
@@ -109,7 +112,7 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
   }
 
   private var _profileONoLimit: OcaONo {
-    _profileONoBase + MaxProfiles
+    min(_profileONoBase + MaxProfiles, ReservedONoLimit)
   }
 
   private var _profileONoBase: OcaONo = 0
@@ -121,6 +124,13 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
     }
     _nextProfileONo += 1
     return oNo
+  }
+
+  /// Allocate an object number for a locally created object that does not have a
+  /// `localObjectNumber` defined in the schema. These are allocated from the same
+  /// profile ONo range to ensure they remain below `ReservedONoLimit`.
+  func allocateLocalONo() throws -> OcaONo {
+    try allocateProfileONo()
   }
 
   @OcaDevice

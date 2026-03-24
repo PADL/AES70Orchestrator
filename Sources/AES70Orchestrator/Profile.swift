@@ -97,6 +97,10 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     objectBindings.removeValue(forKey: oNo)
   }
 
+  var localObjectNumbers: Dictionary<OcaONo, any OcaObjectBindingRepresentable>.Keys {
+    objectBindings.keys
+  }
+
   func remoteObjectCount(
     for deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
   ) -> Int {
@@ -191,7 +195,11 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
 
     for block in schema.blocks {
       try await block.applyRecursive { objectSchema, rolePath, parentRolePath in
-        let oNo = try self.objectNumber(for: objectSchema.localObjectNumber)
+        let oNo: OcaONo? = if let localObjectNumber = objectSchema.localObjectNumber {
+          try self.objectNumber(for: localObjectNumber)
+        } else {
+          try coordinator.allocateLocalONo()
+        }
         let object = try await objectSchema.createLocalObject(
           objectNumber: oNo,
           deviceDelegate: coordinator.device

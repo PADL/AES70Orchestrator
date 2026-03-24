@@ -381,6 +381,54 @@ struct CoordinatorTests {
     #expect(await profile.objectBinding(for: gainONo) != nil)
     #expect(await profile.objectBinding(for: muteONo) != nil)
   }
+
+  @Test
+  func localObjectsWithoutSchemaONoGetReservedONos() async throws {
+    // schema where the container has no localObjectNumber
+    let gainSchema = OcaProfileObjectSchema(
+      role: "Gain",
+      type: SwiftOCADevice.OcaGain.self,
+      localObjectNumber: OcaONoMask(oNo: 0x200, mask: 0x0F),
+      remoteObjectNumber: OcaONoMask(oNo: 0x200, mask: 0x03)
+    )
+    let containerSchema = OcaProfileObjectSchema(
+      role: "Container",
+      type: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>.self,
+      remoteObjectNumber: OcaONoMask(oNo: 0x100, mask: 0x03),
+      actionObjectSchema: [gainSchema]
+    )
+    let profileSchema = OcaProfileSchema(name: "NoLocalONo", blocks: [containerSchema])
+    let deviceSchema = OcaDeviceSchema(
+      name: "TestDevice",
+      profileSchemas: [profileSchema]
+    )
+    let device = OcaDevice()
+    try await device.initializeDefaultObjects()
+    let broker = await OcaConnectionBroker(
+      connectionOptions: .init(),
+      serviceTypes: nil,
+      deviceModels: nil
+    )
+    let coordinator = try await OcaCoordinator(
+      connectionBroker: broker,
+      deviceSchema: deviceSchema,
+      deviceDelegate: device
+    )
+
+    let oNo = try await coordinator.addProfile(schema: "NoLocalONo")
+    let profile = try await coordinator._findProfile(oNo: oNo)
+
+    // all locally created object numbers (including the container without a schema-defined
+    // localObjectNumber) must be below ReservedONoLimit
+    var allLocalONos = [OcaONo]()
+    for oNo in await profile.localObjectNumbers {
+      allLocalONos.append(oNo)
+    }
+    #expect(!allLocalONos.isEmpty)
+    for localONo in allLocalONos {
+      #expect(localONo < ReservedONoLimit, "Local ONo \(localONo) must be below \(ReservedONoLimit)")
+    }
+  }
 }
 
 // MARK: - Persistence tests

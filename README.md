@@ -51,7 +51,7 @@ Each object in the schema specifies:
 
 - **`classID`** — dotted OCA class ID (e.g. `1.1.1.5` for `OcaGain`), resolved via the device class registry. Omit for containers with children (inferred as `OcaBlock`) or leaves (inferred as `OcaRoot`).
 - **`match`** — remote object number and mask (`oNo/mask`). The mask bits determine how many profile instances can be bound to a single device.
-- **`objectNumber`** — optional local object number and mask for the proxy object.
+- **`objectNumber`** — optional local object number and mask for the proxy object. If omitted, the orchestrator allocates a local object number from the reserved range (below 4096) to avoid conflicts with device-assigned object numbers.
 
 ## Architecture
 

@@ -19,6 +19,7 @@ import FoundationEssentials
 #else
 import Foundation
 #endif
+import AES70OrchestratorClient
 import Logging
 import SwiftOCA
 import SwiftOCADevice
@@ -184,7 +185,7 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
     _profileONoBase = baseONo
     _nextProfileONo = baseONo
     await device.setEventDelegate(self)
-    logger.debug("Coordinator initialized with schemas: \(deviceSchema.profileSchemas.map(\.name))")
+    logger.info("Coordinator initialized with schemas: \(deviceSchema.profileSchemas.map(\.name))")
   }
 
   @OcaDevice
@@ -268,7 +269,7 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
   }
 
   public func onEvent(_ event: SwiftOCA.OcaEvent, parameters: Data) async {
-    logger.debug("onEvent: emitterONo=\(event.emitterONo), eventID=\(event.eventID)")
+    logger.trace("onEvent: emitterONo=\(event.emitterONo), eventID=\(event.eventID)")
     for entry in _schemaEntries.values {
       for profile in entry.profiles.actionObjects {
         await profile.handleLocalEvent(event, parameters: parameters)
@@ -329,93 +330,6 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
       }
     }
     throw OcaCoordinatorError.profileNotFound
-  }
-
-  public struct AddProfileParameters: Ocp1ParametersReflectable, Sendable {
-    public let schema: OcaString
-    public let name: OcaString?
-  }
-
-  public static let AutoDeviceIndex: OcaUint16 = 0xFFFF
-
-  public struct BindProfileParameters: Ocp1ParametersReflectable, Sendable {
-    public let profileONo: OcaONo
-    public let deviceIdentifier: OcaString
-    public let deviceIndex: OcaUint16
-  }
-
-  public struct UnbindProfileParameters: Ocp1ParametersReflectable, Sendable {
-    public let profileONo: OcaONo
-    public let deviceIdentifier: OcaString
-  }
-
-  public struct FindOrDeleteProfileByNameParameters: Ocp1ParametersReflectable, Sendable {
-    public let name: OcaString
-    public let schema: OcaString
-  }
-
-  override public func handleCommand(
-    _ command: Ocp1Command,
-    from controller: any OcaController
-  ) async throws -> Ocp1Response {
-    switch command.methodID {
-    case OcaMethodID("3.2"):
-      let params: AddProfileParameters = try decodeCommand(command)
-      try await ensureWritable(by: controller, command: command)
-      let oNo = try await addProfile(schema: params.schema, name: params.name)
-      return try encodeResponse(oNo)
-    case OcaMethodID("3.3"):
-      let params: BindProfileParameters = try decodeCommand(command)
-      try await ensureWritable(by: controller, command: command)
-      guard let deviceIdentifier = OcaConnectionBroker.DeviceIdentifier(params.deviceIdentifier)
-      else {
-        throw Ocp1Error.status(.parameterError)
-      }
-      try bindProfile(
-        _findProfile(oNo: params.profileONo),
-        to: deviceIdentifier,
-        deviceIndex: params.deviceIndex == Self.AutoDeviceIndex
-          ? nil : OcaONo(params.deviceIndex)
-      )
-      return Ocp1Response()
-    case OcaMethodID("3.4"):
-      let params: UnbindProfileParameters = try decodeCommand(command)
-      try await ensureWritable(by: controller, command: command)
-      guard let deviceIdentifier = OcaConnectionBroker.DeviceIdentifier(params.deviceIdentifier)
-      else {
-        throw Ocp1Error.status(.parameterError)
-      }
-      try await unbindProfile(_findProfile(oNo: params.profileONo), from: deviceIdentifier)
-      return Ocp1Response()
-    case OcaMethodID("3.5"):
-      let params: FindOrDeleteProfileByNameParameters = try decodeCommand(command)
-      try await ensureWritable(by: controller, command: command)
-      try await deleteProfile(named: params.name, schema: params.schema)
-      return Ocp1Response()
-    case OcaMethodID("3.6"):
-      let uuid: OcaString = try decodeCommand(command)
-      try await ensureWritable(by: controller, command: command)
-      guard let uuid = UUID(uuidString: uuid) else {
-        throw Ocp1Error.status(.parameterError)
-      }
-      try await deleteProfile(uuid: uuid)
-      return Ocp1Response()
-    case OcaMethodID("3.7"):
-      let params: FindOrDeleteProfileByNameParameters = try decodeCommand(command)
-      try await ensureReadable(by: controller, command: command)
-      let profile = try findProfile(named: params.name, schema: params.schema)
-      return try encodeResponse(profile.objectNumber)
-    case OcaMethodID("3.8"):
-      let uuid: OcaString = try decodeCommand(command)
-      try await ensureReadable(by: controller, command: command)
-      guard let uuid = UUID(uuidString: uuid) else {
-        throw Ocp1Error.status(.parameterError)
-      }
-      let profile = try findProfile(uuid: uuid)
-      return try encodeResponse(profile.objectNumber)
-    default:
-      return try await super.handleCommand(command, from: controller)
-    }
   }
 
   private func _allocateDeviceIndex(
@@ -560,7 +474,7 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
     to deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
   ) async {
     guard let index = profile.deviceIndices[deviceIdentifier] else { return }
-    logger.debug("Activating \(profile) for \(deviceIdentifier)")
+    logger.trace("Activating \(profile) for \(deviceIdentifier)")
     do {
       try await connectionBroker.connect(device: deviceIdentifier)
       let connection = try await _connection(for: deviceIdentifier)
@@ -574,7 +488,7 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
           )
           activatedBlocks.append(block)
         }
-        logger.debug("Activated \(profile) for \(deviceIdentifier)")
+        logger.trace("Activated \(profile) for \(deviceIdentifier)")
       } catch {
         logger.warning("Failed to activate \(profile) for \(deviceIdentifier): \(error)")
         for block in activatedBlocks {
@@ -594,7 +508,7 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
     from deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
   ) async {
     guard let index = profile.deviceIndices[deviceIdentifier] else { return }
-    logger.debug("Deactivating \(profile) from \(deviceIdentifier)")
+    logger.trace("Deactivating \(profile) from \(deviceIdentifier)")
     guard let connection = try? await _connection(for: deviceIdentifier) else { return }
     let schema = try? profile.profileSchema
     guard let schema else { return }
@@ -604,7 +518,7 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
         connection: connection, schema: block
       )
     }
-    logger.debug("Deactivated \(profile) from \(deviceIdentifier)")
+    logger.trace("Deactivated \(profile) from \(deviceIdentifier)")
   }
 
   private func _deleteProfile(_ profile: OcaProfile) async throws {
@@ -648,5 +562,91 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
       }
     }
     throw OcaCoordinatorError.profileNotFound
+  }
+
+  // MARK: - OCP.1 command handling
+
+  typealias AddProfileParameters =
+    AES70OrchestratorClient.OcaCoordinator.AddProfileParameters
+  typealias BindProfileParameters =
+    AES70OrchestratorClient.OcaCoordinator.BindProfileParameters
+  typealias UnbindProfileParameters =
+    AES70OrchestratorClient.OcaCoordinator.UnbindProfileParameters
+  typealias FindOrDeleteProfileByNameParameters =
+    AES70OrchestratorClient.OcaCoordinator.FindOrDeleteProfileByNameParameters
+
+  override public func handleCommand(
+    _ command: Ocp1Command,
+    from controller: any OcaController
+  ) async throws -> Ocp1Response {
+    switch command.methodID {
+    case OcaMethodID("3.2"): // AddProfile(schema, name?) → ONo
+      let params: AddProfileParameters = try decodeCommand(command)
+      try await ensureWritable(by: controller, command: command)
+      let oNo = try await addProfile(schema: params.schema, name: params.name)
+      return try encodeResponse(oNo)
+    case OcaMethodID("3.3"): // BindProfile(oNo, deviceId, index)
+      let params: BindProfileParameters = try decodeCommand(command)
+      try await ensureWritable(by: controller, command: command)
+      guard let deviceIdentifier = OcaConnectionBroker.DeviceIdentifier(params.deviceIdentifier)
+      else {
+        throw Ocp1Error.status(.parameterError)
+      }
+      try bindProfile(
+        _findProfile(oNo: params.profileONo),
+        to: deviceIdentifier,
+        deviceIndex: params.deviceIndex ==
+          AES70OrchestratorClient.OcaCoordinator.AutoDeviceIndex
+          ? nil : OcaONo(params.deviceIndex)
+      )
+      return Ocp1Response()
+    case OcaMethodID("3.4"): // UnbindProfile(oNo, deviceId)
+      let params: UnbindProfileParameters = try decodeCommand(command)
+      try await ensureWritable(by: controller, command: command)
+      guard let deviceIdentifier = OcaConnectionBroker.DeviceIdentifier(params.deviceIdentifier)
+      else {
+        throw Ocp1Error.status(.parameterError)
+      }
+      try await unbindProfile(_findProfile(oNo: params.profileONo), from: deviceIdentifier)
+      return Ocp1Response()
+    case OcaMethodID("3.5"): // DeleteProfileByName(name, schema)
+      let params: FindOrDeleteProfileByNameParameters = try decodeCommand(command)
+      try await ensureWritable(by: controller, command: command)
+      try await deleteProfile(named: params.name, schema: params.schema)
+      return Ocp1Response()
+    case OcaMethodID("3.6"): // DeleteProfileByUUID(uuid)
+      let uuid: OcaString = try decodeCommand(command)
+      try await ensureWritable(by: controller, command: command)
+      guard let uuid = UUID(uuidString: uuid) else {
+        throw Ocp1Error.status(.parameterError)
+      }
+      try await deleteProfile(uuid: uuid)
+      return Ocp1Response()
+    case OcaMethodID("3.7"): // FindProfileByName(name, schema) → ONo
+      let params: FindOrDeleteProfileByNameParameters = try decodeCommand(command)
+      try await ensureReadable(by: controller, command: command)
+      let profile = try findProfile(named: params.name, schema: params.schema)
+      return try encodeResponse(profile.objectNumber)
+    case OcaMethodID("3.8"): // FindProfileByUUID(uuid) → ONo
+      let uuid: OcaString = try decodeCommand(command)
+      try await ensureReadable(by: controller, command: command)
+      guard let uuid = UUID(uuidString: uuid) else {
+        throw Ocp1Error.status(.parameterError)
+      }
+      let profile = try findProfile(uuid: uuid)
+      return try encodeResponse(profile.objectNumber)
+    case OcaMethodID("3.9"): // ExportState() → OcaLongBlob
+      try decodeNullCommand(command)
+      try await ensureReadable(by: controller, command: command)
+      let blob = try await exportState()
+      return try encodeResponse(blob)
+    case OcaMethodID("3.10"): // ImportState(OcaLongBlob)
+      let blob: OcaLongBlob = try decodeCommand(command)
+      try await ensureWritable(by: controller, command: command)
+      try await importState(from: blob)
+      return Ocp1Response()
+    default:
+      return try await super.handleCommand(command, from: controller)
+    }
   }
 }

@@ -143,30 +143,26 @@ extension OcaCoordinator {
         } catch {
           logger.warning("load: failed to deserialize state for profile \(uuidString): \(error)")
         }
-        logger.debug("Loaded profile \(uuidString) for schema \(schemaName)")
+        logger.trace("Loaded profile \(uuidString) for schema \(schemaName)")
       }
     }
   }
 
   public func save(to url: URL) async throws {
     let tempURL = url.appendingPathExtension(UUID().uuidString)
-    guard let archive = Archive(url: tempURL, accessMode: .create) else {
-      throw OcaCoordinatorError.persistenceError
-    }
+    let archive = try Archive(url: tempURL, accessMode: .create)
     try await _save(to: archive)
     _ = try FileManager.default.replaceItemAt(url, withItemAt: tempURL)
     logger.debug("Saved state to \(url.path)")
   }
 
   public func load(from url: URL) async throws {
-    guard let archive = Archive(url: url, accessMode: .read) else {
-      throw OcaCoordinatorError.persistenceError
-    }
+    let archive = try Archive(url: url, accessMode: .read)
     try await _load(from: archive)
     logger.debug("Loaded state from \(url.path)")
   }
 
-  public func save() async throws -> OcaLongBlob {
+  public func exportState() async throws -> OcaLongBlob {
     let archive = try Archive(data: Data(), accessMode: .create)
     try await _save(to: archive)
     guard let data = archive.data else {
@@ -178,7 +174,7 @@ extension OcaCoordinator {
     return blob
   }
 
-  public func load(from blob: OcaLongBlob) async throws {
+  public func importState(from blob: OcaLongBlob) async throws {
     let archive = try Archive(data: blob.wrappedValue, accessMode: .read)
     try await _load(from: archive)
     logger.debug("Loaded state from blob (\(blob.wrappedValue.count) bytes)")

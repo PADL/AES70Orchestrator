@@ -62,15 +62,13 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
 
   @OcaDeviceProperty(
     propertyID: OcaPropertyID("3.1"),
-    getMethodID: OcaMethodID("3.1"),
-    setMethodID: OcaMethodID("3.2")
+    getMethodID: OcaMethodID("3.1")
   )
   public var schema = ""
 
   @OcaDeviceProperty(
     propertyID: OcaPropertyID("3.2"),
     getMethodID: OcaMethodID("3.3")
-    // setMethodID: OcaMethodID("3.4")
   )
   public var boundDevices = [String]()
 
@@ -109,7 +107,7 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
 
   func handleLocalEvent(_ event: OcaEvent, parameters: Data) async {
     if let binding = objectBindings[event.emitterONo] {
-      coordinator?.logger.debug(
+      coordinator?.logger.trace(
         "handleLocalEvent: \(self) matched binding for ONo \(event.emitterONo)"
       )
       await binding.handleLocalEvent(event, parameters: parameters)
@@ -121,8 +119,7 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     from controller: any OcaController
   ) async throws -> Ocp1Response {
     switch command.methodID {
-    case OcaMethodID("2.2"):
-      // label is read-only on the profile; set it on the proxy block instead
+    case OcaMethodID("2.2"): // SetLabel — blocked, set via proxy block instead
       throw Ocp1Error.status(.permissionDenied)
     default:
       return try await super.handleCommand(command, from: controller)

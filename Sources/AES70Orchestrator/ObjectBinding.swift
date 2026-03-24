@@ -80,7 +80,7 @@ public final class OcaObjectBinding<
       return
     }
 
-    profile?.coordinator?.logger.debug(
+    profile?.coordinator?.logger.trace(
       "handleLocalEvent: forwarding propertyID \(eventData.propertyID) to \(remoteObjects.count) remote object(s)"
     )
     for (deviceID, remoteObject) in remoteObjects {

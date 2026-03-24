@@ -15,6 +15,10 @@ let package = Package(
             name: "AES70Orchestrator",
             targets: ["AES70Orchestrator"]
         ),
+        .library(
+            name: "AES70OrchestratorClient",
+            targets: ["AES70OrchestratorClient"]
+        ),
     ],
     dependencies: [
       .package(url: "https://github.com/PADL/SwiftOCA", branch: "main"),
@@ -30,6 +34,7 @@ let package = Package(
         .target(
             name: "AES70Orchestrator",
             dependencies: [
+              "AES70OrchestratorClient",
               .product(name: "Yams", package: "Yams"),
               .product(name: "SwiftOCA", package: "SwiftOCA"),
               .product(name: "SwiftOCADevice", package: "SwiftOCA"),
@@ -40,6 +45,16 @@ let package = Package(
         .enableExperimentalFeature("StrictConcurrency"),
         .enableExperimentalFeature("NonisolatedNonsendingByDefault"),
       ]
+        ),
+        .target(
+            name: "AES70OrchestratorClient",
+            dependencies: [
+              .product(name: "SwiftOCA", package: "SwiftOCA"),
+            ],
+            swiftSettings: [
+              .enableExperimentalFeature("StrictConcurrency"),
+              .enableExperimentalFeature("NonisolatedNonsendingByDefault"),
+            ]
         ),
         .executableTarget(
             name: "ExampleOrchestrator",

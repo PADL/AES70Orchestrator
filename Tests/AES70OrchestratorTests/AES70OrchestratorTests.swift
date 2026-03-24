@@ -471,6 +471,27 @@ import Testing
     #expect(await restored.objectBinding(for: gainONo) != nil)
     #expect(await restored.objectBinding(for: muteONo) != nil)
   }
+
+  @Test func blobSaveAndLoadRoundTrip() async throws {
+    let (coordinator, _device) = try await CoordinatorTests._makeCoordinator()
+
+    let uuid = UUID()
+    _ = try await coordinator.addProfile(schema: "ChannelStrip", name: "BlobTest", uuid: uuid)
+    let profile = try await coordinator.findProfile(uuid: uuid)
+    try await coordinator.bindProfile(profile, to: Self._testDeviceIdentifier)
+
+    let blob = try await coordinator.exportState()
+    #expect(blob.wrappedValue.count > 0)
+
+    let (coordinator2, _device2) = try await CoordinatorTests._makeCoordinator()
+    try await coordinator2.importState(from: blob)
+
+    let restored = try await coordinator2.findProfile(uuid: uuid)
+    #expect(await restored.label == "BlobTest")
+    #expect(await restored.schema == "ChannelStrip")
+    #expect(await restored.boundDevices.contains(Self._testDeviceIdentifier.id))
+    #expect(await restored.proxyBlock != nil)
+  }
 }
 
 // MARK: - YAML schema parsing tests

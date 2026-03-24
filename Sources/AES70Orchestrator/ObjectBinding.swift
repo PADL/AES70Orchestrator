@@ -48,6 +48,7 @@ public final class OcaObjectBinding<
   var remoteSubscriptions =
     [SwiftOCA.OcaConnectionBroker.DeviceIdentifier: Ocp1Connection.SubscriptionCancellable]()
   weak var profile: OcaProfile?
+  private var _forwardingFromRemote = false
 
   public init(localObject: Local, profile: OcaProfile) {
     self.localObject = localObject
@@ -71,6 +72,7 @@ public final class OcaObjectBinding<
   // forward to all the remote devices
   @OcaDevice
   func handleLocalEvent(_ event: OcaEvent, parameters: Data) async {
+    guard !_forwardingFromRemote else { return }
     guard let eventData = try? OcaPropertyChangedEventData<Data>(data: parameters) else {
       profile?.coordinator?.logger.warning(
         "handleLocalEvent: failed to decode event data for ONo \(event.emitterONo)"
@@ -101,6 +103,9 @@ public final class OcaObjectBinding<
     deviceIdentifier origin: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
   ) async {
     guard let eventData = try? OcaPropertyChangedEventData<Data>(data: parameters) else { return }
+
+    _forwardingFromRemote = true
+    defer { _forwardingFromRemote = false }
 
     // forward to local object
     let localEvent = OcaEvent(emitterONo: localObject.objectNumber, eventID: event.eventID)

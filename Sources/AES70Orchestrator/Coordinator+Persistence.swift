@@ -1,0 +1,157 @@
+//
+// Copyright (c) 2026 PADL Software Pty Ltd
+//
+// Licensed under the Apache License, Version 2.0 (the License);
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an 'AS IS' BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+
+import Foundation
+import SwiftOCA
+@_spi(SwiftOCAPrivate) import SwiftOCADevice
+import ZIPFoundation
+
+private let ArchiveVersion = "v0"
+
+private struct _ProfileManifestEntry: Codable {
+  let name: String?
+  let devices: [String]
+}
+
+extension OcaCoordinator {
+  private func _devicesPath(for schemaName: String) -> String {
+    "\(ArchiveVersion)/\(schemaName)/devices.json"
+  }
+
+  private func _profileStatePath(for schemaName: String, uuid: String) -> String {
+    "\(ArchiveVersion)/\(schemaName)/\(uuid)"
+  }
+
+  private func _addEntry(
+    to archive: Archive,
+    path: String,
+    data: Data
+  ) throws {
+    try archive.addEntry(
+      with: path,
+      type: .file,
+      uncompressedSize: Int64(data.count),
+      compressionMethod: .deflate
+    ) { position, size in
+      data.subdata(in: Int(position)..<(Int(position) + size))
+    }
+  }
+
+  public func save(to url: URL) async throws {
+    guard let archive = Archive(url: url, accessMode: .create) else {
+      throw OcaCoordinatorError.persistenceError
+    }
+
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+
+    for (schemaName, entry) in _schemaEntries {
+      // build devices.json manifest
+      var manifest = [String: _ProfileManifestEntry]()
+      for profile in entry.profiles.actionObjects {
+        let uuid = profile.role
+        manifest[uuid] = _ProfileManifestEntry(
+          name: profile.label,
+          devices: profile.boundDevices
+        )
+      }
+      let devicesData = try encoder.encode(manifest)
+      try _addEntry(to: archive, path: _devicesPath(for: schemaName), data: devicesData)
+
+      // serialize each profile's proxy block state
+      for profile in entry.profiles.actionObjects {
+        guard let proxyBlock = profile.proxyBlock else { continue }
+        let jsonObject = try await proxyBlock.serializeParameterDataset()
+        let stateData = try JSONSerialization.data(
+          withJSONObject: jsonObject,
+          options: [.prettyPrinted, .sortedKeys]
+        )
+        try _addEntry(
+          to: archive,
+          path: _profileStatePath(for: schemaName, uuid: profile.role),
+          data: stateData
+        )
+      }
+    }
+
+    logger.debug("Saved state to \(url.path)")
+  }
+
+  public func load(from url: URL) async throws {
+    guard let archive = Archive(url: url, accessMode: .read) else {
+      throw OcaCoordinatorError.persistenceError
+    }
+
+    let decoder = JSONDecoder()
+
+    for (schemaName, _) in _schemaEntries {
+      // read devices.json manifest
+      let devicesPath = _devicesPath(for: schemaName)
+      guard let devicesEntry = archive[devicesPath] else { continue }
+
+      var devicesData = Data()
+      _ = try archive.extract(devicesEntry) { data in
+        devicesData.append(data)
+      }
+      let manifest = try decoder.decode(
+        [String: _ProfileManifestEntry].self,
+        from: devicesData
+      )
+
+      // recreate each profile
+      for (uuidString, entry) in manifest {
+        guard let uuid = UUID(uuidString: uuidString) else {
+          logger.warning("load: invalid UUID \(uuidString)")
+          continue
+        }
+        let profileONo = try await addProfile(schema: schemaName, name: entry.name, uuid: uuid)
+        let profile = try _findProfile(oNo: profileONo)
+
+        // restore bound devices
+        for deviceID in entry.devices {
+          guard let deviceIdentifier = OcaConnectionBroker.DeviceIdentifier(deviceID) else {
+            logger.warning("load: invalid device identifier \(deviceID)")
+            continue
+          }
+          try bindProfile(profile, to: deviceIdentifier)
+        }
+
+        // restore profile state from proxy block serialization
+        guard let proxyBlock = profile.proxyBlock else { continue }
+        let statePath = _profileStatePath(for: schemaName, uuid: uuidString)
+        guard let stateEntry = archive[statePath] else {
+          logger.warning("load: missing state entry for profile \(uuidString)")
+          continue
+        }
+
+        var stateData = Data()
+        _ = try archive.extract(stateEntry) { data in
+          stateData.append(data)
+        }
+        guard let jsonObject = try JSONSerialization.jsonObject(
+          with: stateData
+        ) as? [String: any Sendable] else {
+          logger.warning("load: invalid state data for profile \(uuidString)")
+          continue
+        }
+        try await proxyBlock.deserializeParameterDataset(jsonObject)
+        logger.debug("Loaded profile \(uuidString) for schema \(schemaName)")
+      }
+    }
+
+    logger.debug("Loaded state from \(url.path)")
+  }
+}

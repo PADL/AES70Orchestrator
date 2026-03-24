@@ -18,6 +18,10 @@ let package = Package(
     ],
     dependencies: [
       .package(url: "https://github.com/PADL/SwiftOCA", branch: "main"),
+      .package(url: "https://github.com/PADL/SocketAddress", from: "0.4.5"),
+      .package(url: "https://github.com/apple/swift-log", from: "1.6.2"),
+      .package(url: "https://github.com/jpsim/Yams", from: "6.2.1"),
+      .package(url: "https://github.com/weichsel/ZIPFoundation", from: "0.9.0"),
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
@@ -25,17 +29,39 @@ let package = Package(
         .target(
             name: "AES70Orchestrator",
             dependencies: [
+              .product(name: "Yams", package: "Yams"),
               .product(name: "SwiftOCA", package: "SwiftOCA"),
               .product(name: "SwiftOCADevice", package: "SwiftOCA"),
+              .product(name: "Logging", package: "swift-log"),
+              .product(name: "ZIPFoundation", package: "ZIPFoundation"),
               ],
       swiftSettings: [
         .enableExperimentalFeature("StrictConcurrency"),
         .enableExperimentalFeature("NonisolatedNonsendingByDefault"),
       ]
         ),
+        .executableTarget(
+            name: "ExampleOrchestrator",
+            dependencies: [
+              "AES70Orchestrator",
+              .product(name: "SwiftOCA", package: "SwiftOCA"),
+              .product(name: "SwiftOCADevice", package: "SwiftOCA"),
+              .product(name: "SocketAddress", package: "SocketAddress"),
+              .product(name: "Logging", package: "swift-log"),
+            ],
+            path: "Examples/ExampleOrchestrator",
+            swiftSettings: [
+              .enableExperimentalFeature("StrictConcurrency"),
+              .enableExperimentalFeature("NonisolatedNonsendingByDefault"),
+            ]
+        ),
         .testTarget(
             name: "AES70OrchestratorTests",
-            dependencies: ["AES70Orchestrator"]
+            dependencies: [
+              "AES70Orchestrator",
+              .product(name: "SwiftOCA", package: "SwiftOCA"),
+              .product(name: "SwiftOCADevice", package: "SwiftOCA"),
+            ],
         ),
     ]
 )

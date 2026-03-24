@@ -69,8 +69,8 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
 
   @OcaDeviceProperty(
     propertyID: OcaPropertyID("3.2"),
-    getMethodID: OcaMethodID("3.3"),
-    setMethodID: OcaMethodID("3.4")
+    getMethodID: OcaMethodID("3.3")
+    // setMethodID: OcaMethodID("3.4")
   )
   public var boundDevices = [String]()
 

@@ -94,6 +94,10 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
   var _schemaEntries = [String: _SchemaEntry]()
   private var _nextProfileONo: OcaONo = 0
   private var _brokerEventTask: Task<(), Never>?
+  var _persistenceMonitorTask: Task<(), Never>?
+
+  public let events: AsyncStream<SwiftOCA.OcaEvent>
+  private let _eventsContinuation: AsyncStream<SwiftOCA.OcaEvent>.Continuation
 
   private func _schemaEntry(for schemaName: String) throws -> _SchemaEntry {
     guard let entry = _schemaEntries[schemaName] else {
@@ -127,6 +131,9 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
     self.deviceSchema = deviceSchema
     self.connectionBroker = connectionBroker
     self.logger = logger
+    let (stream, continuation) = AsyncStream<SwiftOCA.OcaEvent>.makeStream()
+    self.events = stream
+    self._eventsContinuation = continuation
     _profilesBlock = try await .init(
       objectNumber: ProfilesContainerONo,
       lockable: false,
@@ -222,6 +229,8 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
 
   deinit {
     _brokerEventTask?.cancel()
+    _persistenceMonitorTask?.cancel()
+    _eventsContinuation.finish()
   }
 
   public func handleBrokerEvent(
@@ -264,6 +273,7 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
         await profile.handleLocalEvent(event, parameters: parameters)
       }
     }
+    _eventsContinuation.yield(event)
   }
 
   public func onControllerExpiry(_ controller: any SwiftOCADevice.OcaController) async {}

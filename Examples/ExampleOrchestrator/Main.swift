@@ -14,6 +14,7 @@
 // limitations under the License.
 //
 
+import AsyncAlgorithms
 import Foundation
 import AES70Orchestrator
 import Logging
@@ -70,8 +71,14 @@ let ocaDeviceSchema: OcaDeviceSchema = {
 @main
 enum ExampleOrchestrator {
   static let port: UInt16 = 65100
+  static let defaultStateFile = "ExampleOrchestratorState.zip"
 
   static func main() async throws {
+    let stateFile = CommandLine.arguments.count > 1
+      ? CommandLine.arguments[1]
+      : defaultStateFile
+    let stateURL = URL(fileURLWithPath: stateFile)
+
     var logger = Logger(label: "com.padl.ExampleOrchestrator")
     logger.logLevel = .debug
 
@@ -115,21 +122,28 @@ enum ExampleOrchestrator {
       logger: logger
     )
 
-    let profileONo = try await coordinator.addProfile(
-      schema: "OCADevice",
-      name: "Test Profile"
-    )
-    print("Created profile with ONo \(profileONo)")
+    if FileManager.default.fileExists(atPath: stateURL.path) {
+      try await coordinator.load(from: stateURL)
+      print("Loaded state from \(stateFile)")
+    } else {
+      let profileONo = try await coordinator.addProfile(
+        schema: "OCADevice",
+        name: "Test Profile"
+      )
+      print("Created profile with ONo \(profileONo)")
 
-    let deviceIdentifier = OcaConnectionBroker.DeviceIdentifier(
-      serviceType: .tcp,
-      modelGUID: OcaModelGUID(mfrCode: .init((0, 0, 0)), modelCode: (1, 2, 3, 4)),
-      serialNumber: "OCADevice-00000001",
-      name: "OCA Test"
-    )
-    let profile = try await coordinator.findProfile(named: "Test Profile", schema: "OCADevice")
-    try await coordinator.bindProfile(profile, to: deviceIdentifier, deviceIndex: 0)
-    print("Bound profile to \(deviceIdentifier)")
+      let deviceIdentifier = OcaConnectionBroker.DeviceIdentifier(
+        serviceType: .tcp,
+        modelGUID: OcaModelGUID(mfrCode: .init((0, 0, 0)), modelCode: (1, 2, 3, 4)),
+        serialNumber: "OCADevice-00000001",
+        name: "OCA Test"
+      )
+      let profile = try await coordinator.findProfile(named: "Test Profile", schema: "OCADevice")
+      try await coordinator.bindProfile(profile, to: deviceIdentifier, deviceIndex: 0)
+      print("Bound profile to \(deviceIdentifier)")
+    }
+
+    await coordinator.startPersistenceMonitor(url: stateURL)
 
     signal(SIGPIPE, SIG_IGN)
 

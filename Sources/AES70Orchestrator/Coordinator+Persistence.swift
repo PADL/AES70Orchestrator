@@ -14,6 +14,7 @@
 // limitations under the License.
 //
 
+import AsyncAlgorithms
 import Foundation
 import SwiftOCA
 @_spi(SwiftOCAPrivate) import SwiftOCADevice
@@ -51,7 +52,8 @@ extension OcaCoordinator {
   }
 
   public func save(to url: URL) async throws {
-    guard let archive = Archive(url: url, accessMode: .create) else {
+    let tempURL = url.appendingPathExtension(UUID().uuidString)
+    guard let archive = Archive(url: tempURL, accessMode: .create) else {
       throw OcaCoordinatorError.persistenceError
     }
 
@@ -87,6 +89,7 @@ extension OcaCoordinator {
       }
     }
 
+    _ = try FileManager.default.replaceItemAt(url, withItemAt: tempURL)
     logger.debug("Saved state to \(url.path)")
   }
 
@@ -147,11 +150,32 @@ extension OcaCoordinator {
           logger.warning("load: invalid state data for profile \(uuidString)")
           continue
         }
-        try await proxyBlock.deserializeParameterDataset(jsonObject)
+        do {
+          try await proxyBlock.deserializeParameterDataset(jsonObject)
+        } catch {
+          logger.warning("load: failed to deserialize state for profile \(uuidString): \(error)")
+        }
         logger.debug("Loaded profile \(uuidString) for schema \(schemaName)")
       }
     }
 
     logger.debug("Loaded state from \(url.path)")
+  }
+
+  public func startPersistenceMonitor(
+    url: URL,
+    debounceInterval: Duration = .seconds(1)
+  ) {
+    _persistenceMonitorTask?.cancel()
+    _persistenceMonitorTask = Task { [weak self] in
+      guard let self else { return }
+      for await _ in events.debounce(for: debounceInterval) {
+        do {
+          try await save(to: url)
+        } catch {
+          logger.warning("Persistence monitor: failed to save: \(error)")
+        }
+      }
+    }
   }
 }

@@ -81,6 +81,7 @@ let package = Package(
               "AES70Orchestrator",
               .product(name: "SwiftOCA", package: "SwiftOCA"),
               .product(name: "SwiftOCADevice", package: "SwiftOCA"),
+              .product(name: "SocketAddress", package: "SocketAddress"),
             ],
             swiftSettings: [
               .enableExperimentalFeature("StrictConcurrency"),

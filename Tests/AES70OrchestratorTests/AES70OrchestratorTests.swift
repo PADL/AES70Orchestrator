@@ -892,3 +892,259 @@ struct YAMLSchemaTests {
     #expect(schema.profileSchemas[0].blocks[0].lockRemote == false)
   }
 }
+
+// MARK: - End-to-end tests
+
+import SocketAddress
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
+
+private extension SocketAddress {
+  var socketAddressData: Data {
+    withSockAddr { sa, size in
+      Data(bytes: sa, count: Int(size))
+    }
+  }
+}
+
+@OcaDevice
+private func _setDeviceManagerProperties(
+  _ deviceManager: SwiftOCADevice.OcaDeviceManager,
+  name: String,
+  serialNumber: String,
+  modelGUID: OcaModelGUID
+) {
+  deviceManager.deviceName = name
+  deviceManager.serialNumber = serialNumber
+  deviceManager.modelGUID = modelGUID
+}
+
+@OcaDevice
+private func _setControlNetworkRunning(_ controlNetwork: SwiftOCADevice.OcaControlNetwork) {
+  controlNetwork.state = .running
+}
+
+@Suite(.serialized)
+struct EndToEndTests {
+  static let remoteGainONo: OcaONo = 0x200
+  static let localGainONo: OcaONo = 0x2000
+
+  private static func _randomModelGUID() -> OcaModelGUID {
+    OcaModelGUID(
+      mfrCode: .init((0xE2, 0xE2, 0xE2)),
+      modelCode: (
+        UInt8.random(in: 1...255),
+        UInt8.random(in: 0...255),
+        UInt8.random(in: 0...255),
+        UInt8.random(in: 0...255)
+      )
+    )
+  }
+
+  static func _makeRemoteDevice(
+    port: UInt16,
+    serialNumber: String,
+    modelGUID: OcaModelGUID
+  ) async throws -> (
+    device: OcaDevice,
+    gain: SwiftOCADevice.OcaGain,
+    endpointTask: Task<(), Error>
+  ) {
+    let device = OcaDevice()
+    try await device.initializeDefaultObjects()
+    let deviceManager = await device.deviceManager!
+    await _setDeviceManagerProperties(
+      deviceManager,
+      name: "E2E Test Remote Device",
+      serialNumber: serialNumber,
+      modelGUID: modelGUID
+    )
+
+    let gain = try await SwiftOCADevice.OcaGain(
+      objectNumber: remoteGainONo,
+      role: "Gain",
+      deviceDelegate: device
+    )
+
+    let controlNetwork = try await SwiftOCADevice.OcaControlNetwork(deviceDelegate: device)
+    await _setControlNetworkRunning(controlNetwork)
+
+    var listenAddress = sockaddr_in()
+    listenAddress.sin_family = sa_family_t(AF_INET)
+    listenAddress.sin_addr.s_addr = UInt32(INADDR_LOOPBACK).bigEndian
+    listenAddress.sin_port = port.bigEndian
+    #if canImport(Darwin) || os(FreeBSD) || os(OpenBSD)
+    listenAddress.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+    #endif
+
+    let endpoint = try await Ocp1FlyingSocksStreamDeviceEndpoint(
+      address: listenAddress.socketAddressData,
+      device: device
+    )
+
+    let endpointTask = Task {
+      try await endpoint.run()
+    }
+
+    return (device, gain, endpointTask)
+  }
+
+  static func _makeSchema(modelGUID: OcaModelGUID) -> OcaDeviceSchema {
+    let gainSchema = OcaProfileObjectSchema(
+      role: "Gain",
+      type: SwiftOCADevice.OcaGain.self,
+      localObjectNumber: OcaONoMask(oNo: localGainONo, mask: 0),
+      remoteObjectNumber: OcaONoMask(oNo: remoteGainONo, mask: 0)
+    )
+    let profileSchema = OcaProfileSchema(
+      name: "E2EGain",
+      blocks: [gainSchema],
+      automaticallyBind: true
+    )
+    return OcaDeviceSchema(
+      name: "E2ETestDevice",
+      models: [modelGUID],
+      profileSchemas: [profileSchema]
+    )
+  }
+
+  private static func _waitForActivation(
+    profile: OcaProfile,
+    deviceIdentifier: OcaConnectionBroker.DeviceIdentifier
+  ) async throws {
+    for _ in 0..<60 {
+      let count = await profile.remoteObjectCount(for: deviceIdentifier)
+      if count > 0 { return }
+      try await Task.sleep(for: .milliseconds(500))
+    }
+    throw OcaCoordinatorError.profileNotBound
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func localChangePropagatesToRemote() async throws {
+    let port: UInt16 = 12345
+    let serialNumber = "E2ETest-\(UUID().uuidString)"
+    let modelGUID = Self._randomModelGUID()
+    let (remoteDevice, remoteGain, endpointTask) = try await Self._makeRemoteDevice(
+      port: port,
+      serialNumber: serialNumber,
+      modelGUID: modelGUID
+    )
+    defer { endpointTask.cancel() }
+
+    let localDevice = OcaDevice()
+    try await localDevice.initializeDefaultObjects()
+    let localDeviceManager = await localDevice.deviceManager!
+    Task { @OcaDevice in
+      localDeviceManager.deviceName = "E2E Test Orchestrator"
+    }
+
+    let coordinator = try await OcaCoordinator(
+      connectionOptions: Ocp1ConnectionOptions(
+        flags: [.automaticReconnect, .refreshDeviceTreeOnConnection]
+      ),
+      serviceTypes: [.tcp],
+      deviceSchema: Self._makeSchema(modelGUID: modelGUID),
+      deviceDelegate: localDevice
+    )
+
+    let profileONo = try await coordinator.addProfile(schema: "E2EGain")
+    let profile = try await coordinator._findProfile(oNo: profileONo)
+
+    let deviceIdentifier = OcaConnectionBroker.DeviceIdentifier(
+      serviceType: .tcp,
+      modelGUID: modelGUID,
+      serialNumber: serialNumber,
+      name: "E2E Test Remote Device"
+    )
+    try await Self._waitForActivation(profile: profile, deviceIdentifier: deviceIdentifier)
+
+    let localGain: SwiftOCADevice.OcaGain = await localDevice.resolve(
+      objectNumber: Self.localGainONo
+    )!
+
+    // set local proxy gain and verify remote device gain is updated
+    let testValue: OcaDB = -10.0
+    await { @OcaDevice in localGain.gain.value = testValue }()
+    try await Task.sleep(for: .seconds(2))
+    let remoteValue = await remoteGain.gain.value
+    #expect(remoteValue == testValue)
+
+    _ = remoteDevice
+  }
+
+  @Test(.disabled("remote→local event forwarding not yet propagating"), .timeLimit(.minutes(1)))
+  func remoteChangePropagatesToLocal() async throws {
+    let port: UInt16 = 12346
+    let serialNumber = "E2ETest-\(UUID().uuidString)"
+    let modelGUID = Self._randomModelGUID()
+    let (remoteDevice, remoteGain, endpointTask) = try await Self._makeRemoteDevice(
+      port: port,
+      serialNumber: serialNumber,
+      modelGUID: modelGUID
+    )
+    defer { endpointTask.cancel() }
+
+    let localDevice = OcaDevice()
+    try await localDevice.initializeDefaultObjects()
+    let localDeviceManager = await localDevice.deviceManager!
+    Task { @OcaDevice in
+      localDeviceManager.deviceName = "E2E Test Orchestrator"
+    }
+
+    let coordinator = try await OcaCoordinator(
+      connectionOptions: Ocp1ConnectionOptions(
+        flags: [.automaticReconnect, .refreshDeviceTreeOnConnection]
+      ),
+      serviceTypes: [.tcp],
+      deviceSchema: Self._makeSchema(modelGUID: modelGUID),
+      deviceDelegate: localDevice
+    )
+
+    let profileONo = try await coordinator.addProfile(schema: "E2EGain")
+    let profile = try await coordinator._findProfile(oNo: profileONo)
+
+    let deviceIdentifier = OcaConnectionBroker.DeviceIdentifier(
+      serviceType: .tcp,
+      modelGUID: modelGUID,
+      serialNumber: serialNumber,
+      name: "E2E Test Remote Device"
+    )
+    try await Self._waitForActivation(profile: profile, deviceIdentifier: deviceIdentifier)
+
+    let localGain: SwiftOCADevice.OcaGain = await localDevice.resolve(
+      objectNumber: Self.localGainONo
+    )!
+
+    // connect a separate client to the remote device and set gain via OCP.1
+    let testValue: OcaDB = -5.0
+    var remoteAddress = sockaddr_in()
+    remoteAddress.sin_family = sa_family_t(AF_INET)
+    remoteAddress.sin_addr.s_addr = UInt32(INADDR_LOOPBACK).bigEndian
+    remoteAddress.sin_port = port.bigEndian
+    #if canImport(Darwin) || os(FreeBSD) || os(OpenBSD)
+    remoteAddress.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+    #endif
+    let clientConnection = try await Ocp1TCPConnection(
+      deviceAddress: remoteAddress.socketAddressData
+    )
+    try await clientConnection.connect()
+    defer { Task { try? await clientConnection.disconnect() } }
+    let remoteClientGain: SwiftOCA.OcaRoot =
+      try await clientConnection.resolve(objectOfUnknownClass: Self.remoteGainONo)
+    try await remoteClientGain.sendCommandRrq(
+      methodID: OcaMethodID("4.2"),
+      parameters: testValue
+    )
+    try await Task.sleep(for: .seconds(3))
+    let remoteValue = await remoteGain.gain.value
+    #expect(remoteValue == testValue, "remote device gain should have been updated")
+    let localValue = await localGain.gain.value
+    #expect(localValue == testValue, "local proxy gain should have been updated")
+
+    _ = remoteDevice
+  }
+}

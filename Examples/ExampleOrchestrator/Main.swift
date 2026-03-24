@@ -14,9 +14,9 @@
 // limitations under the License.
 //
 
+import AES70Orchestrator
 import AsyncAlgorithms
 import Foundation
-import AES70Orchestrator
 import Logging
 import SocketAddress
 import SwiftOCA
@@ -28,6 +28,8 @@ import Glibc
 #elseif canImport(Android)
 import Android
 #endif
+
+let SwiftOCADeviceExampleSchemaName = "com.padl.OCADevice"
 
 private extension SocketAddress {
   var socketAddressData: Data {
@@ -107,7 +109,7 @@ enum ExampleOrchestrator {
       print("Loaded state from \(stateFile)")
     } else {
       let profileONo = try await coordinator.addProfile(
-        schema: "OCADevice",
+        schema: SwiftOCADeviceExampleSchemaName,
         name: "Test Profile"
       )
       print("Created profile with ONo \(profileONo)")
@@ -118,7 +120,10 @@ enum ExampleOrchestrator {
         serialNumber: "OCADevice-00000001",
         name: "OCA Test"
       )
-      let profile = try await coordinator.findProfile(named: "Test Profile", schema: "OCADevice")
+      let profile = try await coordinator.findProfile(
+        named: "Test Profile",
+        schema: SwiftOCADeviceExampleSchemaName
+      )
       try await coordinator.bindProfile(profile, to: deviceIdentifier, deviceIndex: 0)
       print("Bound profile to \(deviceIdentifier)")
     }

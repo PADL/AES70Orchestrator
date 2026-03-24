@@ -134,8 +134,8 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
     self.connectionBroker = connectionBroker
     self.logger = logger
     let (stream, continuation) = AsyncStream<SwiftOCA.OcaEvent>.makeStream()
-    self.events = stream
-    self._eventsContinuation = continuation
+    events = stream
+    _eventsContinuation = continuation
     _profilesBlock = try await .init(
       objectNumber: ProfilesContainerONo,
       lockable: false,

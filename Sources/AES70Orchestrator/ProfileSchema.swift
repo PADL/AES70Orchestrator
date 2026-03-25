@@ -186,21 +186,17 @@ public struct OcaProfileObjectSchema: Sendable, CustomStringConvertible {
   }
 }
 
-/// A named profile schema consisting of one or more top-level block definitions. When
-/// `automaticallyBind` is set, profiles of this schema are automatically bound to all
-/// discovered devices and only a single profile instance is permitted.
+/// A named profile schema consisting of one or more top-level block definitions.
 public final class OcaProfileSchema: Sendable, CustomStringConvertible {
   public let name: String
   public let blocks: [OcaProfileObjectSchema]
-  public let automaticallyBind: Bool
 
   public var description: String {
-    "OcaProfileSchema(name: \(name), blocks: \(blocks.count), autobind: \(automaticallyBind))"
+    "OcaProfileSchema(name: \(name), blocks: \(blocks.count))"
   }
 
-  public init(name: String, blocks: [OcaProfileObjectSchema], automaticallyBind: Bool = false) {
+  public init(name: String, blocks: [OcaProfileObjectSchema]) {
     self.name = name
     self.blocks = blocks
-    self.automaticallyBind = automaticallyBind
   }
 }

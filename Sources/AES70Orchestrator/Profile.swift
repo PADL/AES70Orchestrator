@@ -58,6 +58,17 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
   nonisolated let schemaName: String
   weak var coordinator: OcaCoordinator?
 
+  private nonisolated static let _zeroUUID = UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+
+  nonisolated var uuid: UUID {
+    UUID(uuidString: role) ?? Self._zeroUUID
+  }
+
+  /// A profile with a zero UUID is automatically bound to all discovered devices.
+  nonisolated var isAutomaticallyBound: Bool {
+    uuid == Self._zeroUUID
+  }
+
   override public nonisolated var description: String {
     "OcaProfile(oNo: \(objectNumber), index: \(profileIndex), schema: \(schemaName), role: \(role))"
   }

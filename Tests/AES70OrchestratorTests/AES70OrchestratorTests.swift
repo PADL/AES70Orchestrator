@@ -477,36 +477,15 @@ struct CoordinatorTests {
     }
   }
 
+  static let _zeroUUID = UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+
   @Test
   func autobindRejectsManualBind() async throws {
-    let gainSchema = OcaProfileObjectSchema(
-      role: "Gain",
-      type: SwiftOCADevice.OcaGain.self,
-      localObjectNumber: OcaONoMask(oNo: 0x2000, mask: 0x0F),
-      remoteObjectNumber: OcaONoMask(oNo: 0x200, mask: 0x03)
+    let (coordinator, _device) = try await Self._makeCoordinator()
+    let oNo = try await coordinator.addProfile(
+      schema: "ChannelStrip",
+      uuid: Self._zeroUUID
     )
-    let profileSchema = OcaProfileSchema(
-      name: "AutoGain",
-      blocks: [gainSchema],
-      automaticallyBind: true
-    )
-    let deviceSchema = OcaDeviceSchema(
-      name: "TestDevice",
-      profileSchemas: [profileSchema]
-    )
-    let device = OcaDevice()
-    try await device.initializeDefaultObjects()
-    let broker = await OcaConnectionBroker(
-      connectionOptions: .init(),
-      serviceTypes: nil,
-      deviceModels: nil
-    )
-    let coordinator = try await OcaCoordinator(
-      connectionBroker: broker,
-      deviceSchema: deviceSchema,
-      deviceDelegate: device
-    )
-    let oNo = try await coordinator.addProfile(schema: "AutoGain")
     let profile = try await coordinator._findProfile(oNo: oNo)
 
     await #expect(throws: OcaCoordinatorError.self) {
@@ -519,36 +498,16 @@ struct CoordinatorTests {
 
   @Test
   func autobindEnforcesSingleProfile() async throws {
-    let gainSchema = OcaProfileObjectSchema(
-      role: "Gain",
-      type: SwiftOCADevice.OcaGain.self,
-      localObjectNumber: OcaONoMask(oNo: 0x2000, mask: 0x0F),
-      remoteObjectNumber: OcaONoMask(oNo: 0x200, mask: 0x03)
+    let (coordinator, _device) = try await Self._makeCoordinator()
+    _ = try await coordinator.addProfile(
+      schema: "ChannelStrip",
+      uuid: Self._zeroUUID
     )
-    let profileSchema = OcaProfileSchema(
-      name: "AutoGain",
-      blocks: [gainSchema],
-      automaticallyBind: true
-    )
-    let deviceSchema = OcaDeviceSchema(
-      name: "TestDevice",
-      profileSchemas: [profileSchema]
-    )
-    let device = OcaDevice()
-    try await device.initializeDefaultObjects()
-    let broker = await OcaConnectionBroker(
-      connectionOptions: .init(),
-      serviceTypes: nil,
-      deviceModels: nil
-    )
-    let coordinator = try await OcaCoordinator(
-      connectionBroker: broker,
-      deviceSchema: deviceSchema,
-      deviceDelegate: device
-    )
-    _ = try await coordinator.addProfile(schema: "AutoGain")
     await #expect(throws: OcaCoordinatorError.self) {
-      try await coordinator.addProfile(schema: "AutoGain")
+      try await coordinator.addProfile(
+        schema: "ChannelStrip",
+        uuid: Self._zeroUUID
+      )
     }
   }
 }
@@ -842,12 +801,11 @@ struct YAMLSchemaTests {
     }
   }
 
-  static let _autobindYAML = """
+  static let _blockMappingYAML = """
   device:
-    name: AutoDevice
+    name: BlockMappingDevice
     profiles:
-      - AutoProfile:
-          autobind: true
+      - BlockProfile:
           blocks:
             - Gain:
                 classID: 1.1.1.5
@@ -856,17 +814,11 @@ struct YAMLSchemaTests {
   """
 
   @Test
-  func parseAutobind() async throws {
-    let schema = try await OcaDeviceSchema(yaml: Self._autobindYAML)
+  func parseBlockMapping() async throws {
+    let schema = try await OcaDeviceSchema(yaml: Self._blockMappingYAML)
     #expect(schema.profileSchemas.count == 1)
-    #expect(schema.profileSchemas[0].automaticallyBind == true)
+    #expect(schema.profileSchemas[0].name == "BlockProfile")
     #expect(schema.profileSchemas[0].blocks.count == 1)
-  }
-
-  @Test
-  func parseAutobindDefaultsFalse() async throws {
-    let schema = try await OcaDeviceSchema(yaml: Self._minimalYAML)
-    #expect(schema.profileSchemas[0].automaticallyBind == false)
   }
 
   @Test
@@ -1004,8 +956,7 @@ struct EndToEndTests {
     )
     let profileSchema = OcaProfileSchema(
       name: "E2EGain",
-      blocks: [gainSchema],
-      automaticallyBind: true
+      blocks: [gainSchema]
     )
     return OcaDeviceSchema(
       name: "E2ETestDevice",
@@ -1041,7 +992,8 @@ struct EndToEndTests {
       deviceDelegate: localDevice
     )
 
-    let profileONo = try await coordinator.addProfile(schema: "E2EGain")
+    let zeroUUID = UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+    let profileONo = try await coordinator.addProfile(schema: "E2EGain", uuid: zeroUUID)
     let profile = try await coordinator._findProfile(oNo: profileONo)
 
     let deviceIdentifier = OcaConnectionBroker.DeviceIdentifier(
@@ -1070,7 +1022,7 @@ struct EndToEndTests {
     let brokerEventTask = Task { [weak coordinator] in
       guard let coordinator else { return }
       for await event in await broker.events {
-        await coordinator.handleBrokerEvent(event)
+        await coordinator.handleConnectionBrokerEvent(event)
       }
     }
     _ = brokerEventTask

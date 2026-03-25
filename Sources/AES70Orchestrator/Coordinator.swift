@@ -29,13 +29,13 @@ let PADLCompanyID = OcaOrganizationID((0x0A, 0xE9, 0x1B))
 public let OcaCoordinatorONo = OcaONo(1024)
 // locally created objects must use object numbers below this to avoid conflicting with device
 // object numbers
-let ReservedONoLimit = OcaONo(4096)
+let ReservedONoLimit = OcaMaximumReservedONo
 // FIXME: in order to not conflict with device ONo space we are going to use the reserved ONos
 let ProfilesContainerONo = OcaONo(1025)
 let ProfileProxiesContainerONo = OcaONo(1026)
 // per-schema blocks start at ProfileProxiesContainerONo + 1, with 2 blocks per schema
 // (one for profiles, one for proxies), so the profile ONo range starts after those
-let MaxProfiles = OcaONo(100)
+let MaxProfiles = OcaONo(256)
 
 /// Errors thrown by the orchestrator during profile management, device binding, and schema parsing.
 public enum OcaCoordinatorError: Error {

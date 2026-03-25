@@ -980,7 +980,7 @@ struct EndToEndTests {
     listenAddress.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
     #endif
 
-    let endpoint = try await Ocp1FlyingSocksStreamDeviceEndpoint(
+    let endpoint = try await Ocp1DeviceEndpoint(
       address: listenAddress.socketAddressData,
       device: device
     )

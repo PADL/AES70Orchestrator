@@ -44,16 +44,15 @@ private extension SocketAddress {
 @main
 enum ExampleOrchestrator {
   static let port: UInt16 = 65100
-  static let defaultStateFile = "ExampleOrchestratorState.zip"
 
   static func main() async throws {
-    let stateFile = CommandLine.arguments.count > 1
-      ? CommandLine.arguments[1]
-      : defaultStateFile
-    let stateURL = URL(fileURLWithPath: stateFile)
+    let args = CommandLine.arguments.dropFirst()
+    let trace = args.contains("--trace") || args.contains("-v")
+    let stateFile = args.first { !$0.hasPrefix("-") }
+    let stateURL = stateFile.map { URL(fileURLWithPath: $0) }
 
     var logger = Logger(label: "com.padl.ExampleOrchestrator")
-    logger.logLevel = .debug
+    logger.logLevel = trace ? .trace : .debug
 
     var listenAddress = sockaddr_in()
     listenAddress.sin_family = sa_family_t(AF_INET)
@@ -104,9 +103,9 @@ enum ExampleOrchestrator {
       logger: logger
     )
 
-    if FileManager.default.fileExists(atPath: stateURL.path) {
+    if let stateURL, FileManager.default.fileExists(atPath: stateURL.path) {
       try await coordinator.import(from: stateURL)
-      print("Loaded state from \(stateFile)")
+      print("Loaded state from \(stateFile!)")
     } else {
       let profileONo = try await coordinator.addProfile(
         schema: SwiftOCADeviceExampleSchemaName,
@@ -128,7 +127,9 @@ enum ExampleOrchestrator {
       print("Bound profile to \(deviceIdentifier)")
     }
 
-    await coordinator.startPersistenceMonitor(url: stateURL)
+    if let stateURL {
+      await coordinator.startPersistenceMonitor(url: stateURL)
+    }
 
     signal(SIGPIPE, SIG_IGN)
 

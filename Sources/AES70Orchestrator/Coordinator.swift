@@ -52,6 +52,49 @@ public enum OcaCoordinatorError: Error {
   case schemaParseError(String)
 }
 
+/// Holds the per-schema profile and proxy block containers, along with device index tracking.
+@OcaDevice
+final class _SchemaEntry {
+  let profiles: SwiftOCADevice.OcaBlock<OcaProfile>
+  let proxies: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>
+  var nextProfileIndex: OcaONo = 0
+  var deviceIndices = [SwiftOCA.OcaConnectionBroker.DeviceIdentifier: Set<OcaONo>]()
+
+  init(
+    schema: OcaProfileSchema,
+    index: Int,
+    schemaCount: OcaONo,
+    device: OcaDevice,
+    profilesBlock: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>,
+    profileProxiesBlock: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>
+  ) async throws {
+    let profilesONo = ProfileProxiesContainerONo + 1 + OcaONo(index)
+    let proxiesONo = ProfileProxiesContainerONo + 1 + schemaCount + OcaONo(index)
+    profiles = try await .init(
+      objectNumber: profilesONo,
+      lockable: false,
+      role: schema.name,
+      deviceDelegate: device,
+      addToRootBlock: false
+    )
+    proxies = try await .init(
+      objectNumber: proxiesONo,
+      lockable: false,
+      role: schema.name,
+      deviceDelegate: device,
+      addToRootBlock: false
+    )
+    try await profilesBlock.add(actionObject: profiles)
+    try await profileProxiesBlock.add(actionObject: proxies)
+  }
+
+  func allocateProfileIndex() -> OcaONo {
+    let index = nextProfileIndex
+    nextProfileIndex += 1
+    return index
+  }
+}
+
 /// The central coordinator that manages profile lifecycle, device discovery, and binding.
 /// It exposes an OCA manager interface and orchestrates connections between local proxy
 /// objects and remote device objects according to the configured device schema.
@@ -79,48 +122,6 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
     getMethodID: OcaMethodID("3.1")
   )
   public var currentDeviceIdentifiers = [OcaString]()
-
-  @OcaDevice
-  final class _SchemaEntry {
-    let profiles: SwiftOCADevice.OcaBlock<OcaProfile>
-    let proxies: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>
-    var nextProfileIndex: OcaONo = 0
-    var deviceIndices = [SwiftOCA.OcaConnectionBroker.DeviceIdentifier: Set<OcaONo>]()
-
-    init(
-      schema: OcaProfileSchema,
-      index: Int,
-      schemaCount: OcaONo,
-      device: OcaDevice,
-      profilesBlock: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>,
-      profileProxiesBlock: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>
-    ) async throws {
-      let profilesONo = ProfileProxiesContainerONo + 1 + OcaONo(index)
-      let proxiesONo = ProfileProxiesContainerONo + 1 + schemaCount + OcaONo(index)
-      profiles = try await .init(
-        objectNumber: profilesONo,
-        lockable: false,
-        role: schema.name,
-        deviceDelegate: device,
-        addToRootBlock: false
-      )
-      proxies = try await .init(
-        objectNumber: proxiesONo,
-        lockable: false,
-        role: schema.name,
-        deviceDelegate: device,
-        addToRootBlock: false
-      )
-      try await profilesBlock.add(actionObject: profiles)
-      try await profileProxiesBlock.add(actionObject: proxies)
-    }
-
-    func allocateProfileIndex() -> OcaONo {
-      let index = nextProfileIndex
-      nextProfileIndex += 1
-      return index
-    }
-  }
 
   let _profilesBlock: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>
   let _profileProxiesBlock: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>
@@ -350,10 +351,9 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
       profileIndex: entry.allocateProfileIndex(),
       schema: schema,
       name: name,
+      entry: entry,
       coordinator: self
     )
-    try await entry.proxies.add(actionObject: profile.proxyBlock!)
-    try await entry.profiles.add(actionObject: profile)
     logger.debug("Added \(profile)")
     return profile.objectNumber
   }

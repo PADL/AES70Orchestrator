@@ -196,6 +196,7 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     profileIndex: OcaONo,
     schema: String,
     name: String?,
+    entry: _SchemaEntry,
     coordinator: OcaCoordinator
   ) async throws {
     self.profileIndex = profileIndex
@@ -218,6 +219,8 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     if let name { proxyBlock.label = name }
     try await _createLocalObjects(proxyBlock: proxyBlock)
     self.proxyBlock = proxyBlock
+    try await entry.proxies.add(actionObject: proxyBlock)
+    try await entry.profiles.add(actionObject: self)
     _startLabelMonitor()
   }
 

@@ -66,16 +66,31 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     propertyID: OcaPropertyID("3.1"),
     getMethodID: OcaMethodID("3.1")
   )
-  public var schema = ""
+  private(set) public var schema = ""
 
   @OcaDeviceProperty(
     propertyID: OcaPropertyID("3.2"),
     getMethodID: OcaMethodID("3.3")
   )
-  public var boundDevices = [String]()
+  private(set) public var boundDevices = [String]()
 
   // maps device identifier to its allocated device index (not exposed via OCA)
-  var deviceIndices = [SwiftOCA.OcaConnectionBroker.DeviceIdentifier: OcaONo]()
+  private(set) var deviceIndices = [SwiftOCA.OcaConnectionBroker.DeviceIdentifier: OcaONo]()
+
+  func bindDevice(
+    _ deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier,
+    index: OcaONo
+  ) {
+    deviceIndices[deviceIdentifier] = index
+    boundDevices.append(deviceIdentifier.id)
+  }
+
+  func unbindDevice(
+    _ deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
+  ) {
+    deviceIndices.removeValue(forKey: deviceIdentifier)
+    boundDevices.removeAll { $0 == deviceIdentifier.id }
+  }
 
   // the proxy block in the "Profile Proxies" hierarchy for this profile's local objects
   var proxyBlock: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>? {
@@ -295,6 +310,60 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
       toMasked: false
     )
     try await proxyBlock.deserializeParameterDataset(remapped)
+  }
+
+  private func _forEachBinding(
+    deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier,
+    deviceIndex: OcaONo,
+    connection: Ocp1Connection,
+    schema: OcaProfileObjectSchema,
+    _ body: (any OcaObjectBindingRepresentable, SwiftOCA.OcaRoot) async throws -> ()
+  ) async throws {
+    try await schema.applyRecursive { objectSchema, _, _ in
+      let remoteONo = try objectSchema.remoteObjectNumber.objectNumber(for: deviceIndex)
+      let remoteObject: SwiftOCA.OcaRoot = try await connection.resolve(
+        objectOfUnknownClass: remoteONo
+      )
+      guard let localONo = try objectNumber(for: objectSchema.localObjectNumber) else {
+        return
+      }
+      guard let binding = objectBinding(for: localONo) else {
+        return
+      }
+      try await body(binding, remoteObject)
+    }
+  }
+
+  func bindRemoteObjects(
+    to deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier,
+    deviceIndex: OcaONo,
+    connection: Ocp1Connection,
+    schema: OcaProfileObjectSchema
+  ) async throws {
+    try await _forEachBinding(
+      deviceIdentifier: deviceIdentifier,
+      deviceIndex: deviceIndex,
+      connection: connection,
+      schema: schema
+    ) { binding, remoteObject in
+      try await binding.bind(remoteObject: remoteObject, from: deviceIdentifier)
+    }
+  }
+
+  func unbindRemoteObjects(
+    from deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier,
+    deviceIndex: OcaONo,
+    connection: Ocp1Connection,
+    schema: OcaProfileObjectSchema
+  ) async {
+    try? await _forEachBinding(
+      deviceIdentifier: deviceIdentifier,
+      deviceIndex: deviceIndex,
+      connection: connection,
+      schema: schema
+    ) { binding, remoteObject in
+      try await binding.unbind(remoteObject: remoteObject, from: deviceIdentifier)
+    }
   }
 
   @OcaDevice

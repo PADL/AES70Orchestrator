@@ -128,6 +128,13 @@ open class OcaCoordinator: SwiftOCA.OcaManager, @unchecked Sendable {
     )
   }
 
+  public func deleteProfile(oNo: OcaONo) async throws {
+    try await sendCommandRrq(
+      methodID: OcaMethodID("3.11"),
+      parameters: oNo
+    )
+  }
+
   // MARK: - Profile lookup
 
   public func findProfile(named name: String, schema: String) async throws -> OcaONo {

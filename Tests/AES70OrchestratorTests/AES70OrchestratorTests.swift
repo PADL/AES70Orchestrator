@@ -989,6 +989,9 @@ struct EndToEndTests {
       try await endpoint.run()
     }
 
+    // allow time for the endpoint to start listening
+    try await Task.sleep(for: .milliseconds(500))
+
     return (device, gain, endpointTask)
   }
 
@@ -1011,16 +1014,75 @@ struct EndToEndTests {
     )
   }
 
-  private static func _waitForActivation(
-    profile: OcaProfile,
+  private static func _makeCoordinator(
+    port: UInt16,
+    modelGUID: OcaModelGUID,
+    serialNumber: String
+  ) async throws -> (
+    coordinator: OcaCoordinator,
+    localDevice: OcaDevice,
     deviceIdentifier: OcaConnectionBroker.DeviceIdentifier
-  ) async throws {
-    for _ in 0..<60 {
-      let count = await profile.remoteObjectCount(for: deviceIdentifier)
-      if count > 0 { return }
-      try await Task.sleep(for: .milliseconds(500))
+  ) {
+    let localDevice = OcaDevice()
+    try await localDevice.initializeDefaultObjects()
+
+    let connectionOptions = Ocp1ConnectionOptions(
+      flags: [.automaticReconnect, .refreshDeviceTreeOnConnection]
+    )
+    let broker = await OcaConnectionBroker(
+      connectionOptions: connectionOptions,
+      serviceTypes: [],
+      deviceModels: nil
+    )
+    let schema = _makeSchema(modelGUID: modelGUID)
+    let coordinator = try await OcaCoordinator(
+      connectionBroker: broker,
+      deviceSchema: schema,
+      deviceDelegate: localDevice
+    )
+
+    let profileONo = try await coordinator.addProfile(schema: "E2EGain")
+    let profile = try await coordinator._findProfile(oNo: profileONo)
+
+    let deviceIdentifier = OcaConnectionBroker.DeviceIdentifier(
+      serviceType: .tcp,
+      modelGUID: modelGUID,
+      serialNumber: serialNumber,
+      name: "E2E Test Remote Device"
+    )
+
+    // connect directly to the remote device, bypassing mDNS discovery
+    var remoteAddress = sockaddr_in()
+    remoteAddress.sin_family = sa_family_t(AF_INET)
+    remoteAddress.sin_addr.s_addr = UInt32(INADDR_LOOPBACK).bigEndian
+    remoteAddress.sin_port = port.bigEndian
+    #if canImport(Darwin) || os(FreeBSD) || os(OpenBSD)
+    remoteAddress.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+    #endif
+    let connection = try await Ocp1TCPConnection(
+      deviceAddress: remoteAddress.socketAddressData,
+      options: connectionOptions
+    )
+    try await connection.connect()
+
+    // register the connection and start listening for broker events
+    await broker.register(device: deviceIdentifier, connection: connection)
+    let brokerEventTask = Task { [weak coordinator] in
+      guard let coordinator else { return }
+      for await event in await broker.events {
+        await coordinator.handleBrokerEvent(event)
+      }
     }
-    throw OcaCoordinatorError.profileNotBound
+    _ = brokerEventTask
+
+    // wait for the auto-bind profile activation to complete
+    for _ in 0..<20 {
+      let count = await profile.remoteObjectCount(for: deviceIdentifier)
+      if count > 0 { break }
+      try await Task.sleep(for: .milliseconds(250))
+    }
+
+    return (coordinator, localDevice, deviceIdentifier)
   }
 
   @Test(.timeLimit(.minutes(1)))
@@ -1035,32 +1097,11 @@ struct EndToEndTests {
     )
     defer { endpointTask.cancel() }
 
-    let localDevice = OcaDevice()
-    try await localDevice.initializeDefaultObjects()
-    let localDeviceManager = await localDevice.deviceManager!
-    Task { @OcaDevice in
-      localDeviceManager.deviceName = "E2E Test Orchestrator"
-    }
-
-    let coordinator = try await OcaCoordinator(
-      connectionOptions: Ocp1ConnectionOptions(
-        flags: [.automaticReconnect, .refreshDeviceTreeOnConnection]
-      ),
-      serviceTypes: [.tcp],
-      deviceSchema: Self._makeSchema(modelGUID: modelGUID),
-      deviceDelegate: localDevice
-    )
-
-    let profileONo = try await coordinator.addProfile(schema: "E2EGain")
-    let profile = try await coordinator._findProfile(oNo: profileONo)
-
-    let deviceIdentifier = OcaConnectionBroker.DeviceIdentifier(
-      serviceType: .tcp,
+    let (coordinator, localDevice, _) = try await Self._makeCoordinator(
+      port: port,
       modelGUID: modelGUID,
-      serialNumber: serialNumber,
-      name: "E2E Test Remote Device"
+      serialNumber: serialNumber
     )
-    try await Self._waitForActivation(profile: profile, deviceIdentifier: deviceIdentifier)
 
     let localGain: SwiftOCADevice.OcaGain = await localDevice.resolve(
       objectNumber: Self.localGainONo
@@ -1076,7 +1117,7 @@ struct EndToEndTests {
     _ = remoteDevice
   }
 
-  @Test(.disabled("remote→local event forwarding not yet propagating"), .timeLimit(.minutes(1)))
+  @Test(.timeLimit(.minutes(1)))
   func remoteChangePropagatesToLocal() async throws {
     let port: UInt16 = 12346
     let serialNumber = "E2ETest-\(UUID().uuidString)"
@@ -1088,32 +1129,11 @@ struct EndToEndTests {
     )
     defer { endpointTask.cancel() }
 
-    let localDevice = OcaDevice()
-    try await localDevice.initializeDefaultObjects()
-    let localDeviceManager = await localDevice.deviceManager!
-    Task { @OcaDevice in
-      localDeviceManager.deviceName = "E2E Test Orchestrator"
-    }
-
-    let coordinator = try await OcaCoordinator(
-      connectionOptions: Ocp1ConnectionOptions(
-        flags: [.automaticReconnect, .refreshDeviceTreeOnConnection]
-      ),
-      serviceTypes: [.tcp],
-      deviceSchema: Self._makeSchema(modelGUID: modelGUID),
-      deviceDelegate: localDevice
-    )
-
-    let profileONo = try await coordinator.addProfile(schema: "E2EGain")
-    let profile = try await coordinator._findProfile(oNo: profileONo)
-
-    let deviceIdentifier = OcaConnectionBroker.DeviceIdentifier(
-      serviceType: .tcp,
+    let (coordinator, localDevice, _) = try await Self._makeCoordinator(
+      port: port,
       modelGUID: modelGUID,
-      serialNumber: serialNumber,
-      name: "E2E Test Remote Device"
+      serialNumber: serialNumber
     )
-    try await Self._waitForActivation(profile: profile, deviceIdentifier: deviceIdentifier)
 
     let localGain: SwiftOCADevice.OcaGain = await localDevice.resolve(
       objectNumber: Self.localGainONo

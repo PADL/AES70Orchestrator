@@ -426,7 +426,10 @@ struct CoordinatorTests {
     }
     #expect(!allLocalONos.isEmpty)
     for localONo in allLocalONos {
-      #expect(localONo < ReservedONoLimit, "Local ONo \(localONo) must be below \(ReservedONoLimit)")
+      #expect(
+        localONo < ReservedONoLimit,
+        "Local ONo \(localONo) must be below \(ReservedONoLimit)"
+      )
     }
   }
 

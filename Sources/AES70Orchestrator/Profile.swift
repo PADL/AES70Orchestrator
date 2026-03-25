@@ -58,7 +58,24 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
   nonisolated let schemaName: String
   weak var coordinator: OcaCoordinator?
 
-  private nonisolated static let _zeroUUID = UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+  private nonisolated static let _zeroUUID = UUID(uuid: (
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ))
 
   nonisolated var uuid: UUID {
     UUID(uuidString: role) ?? Self._zeroUUID
@@ -77,13 +94,13 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     propertyID: OcaPropertyID("3.1"),
     getMethodID: OcaMethodID("3.1")
   )
-  private(set) public var schema = ""
+  public private(set) var schema = ""
 
   @OcaDeviceProperty(
     propertyID: OcaPropertyID("3.2"),
     getMethodID: OcaMethodID("3.3")
   )
-  private(set) public var boundDevices = [String]()
+  public private(set) var boundDevices = [String]()
 
   // maps device identifier to its allocated device index (not exposed via OCA)
   private(set) var deviceIndices = [SwiftOCA.OcaConnectionBroker.DeviceIdentifier: OcaONo]()

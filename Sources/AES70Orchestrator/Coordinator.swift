@@ -346,8 +346,8 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
     }
     let profile = try await OcaProfile(
       role: uuid ?? UUID(),
-      objectNumber: try allocateProfileONo(),
-      proxyBlockObjectNumber: try allocateProfileONo(),
+      objectNumber: allocateProfileONo(),
+      proxyBlockObjectNumber: allocateProfileONo(),
       profileIndex: entry.allocateProfileIndex(),
       schema: schema,
       name: name,

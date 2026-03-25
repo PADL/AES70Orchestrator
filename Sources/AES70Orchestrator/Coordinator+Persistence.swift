@@ -179,6 +179,4 @@ extension OcaCoordinator {
     try await _load(from: archive)
     logger.debug("Loaded state from blob (\(blob.wrappedValue.count) bytes)")
   }
-
-
 }

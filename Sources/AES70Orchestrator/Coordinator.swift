@@ -106,17 +106,6 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
     1
   ) }
 
-  var device: OcaDevice {
-    get throws {
-      guard let device = deviceDelegate else { throw Ocp1Error.status(.deviceError) }
-      return device
-    }
-  }
-
-  let connectionBroker: SwiftOCA.OcaConnectionBroker
-  let deviceSchema: OcaDeviceSchema
-  nonisolated let logger: Logger
-
   @OcaDeviceProperty(
     propertyID: OcaPropertyID("3.1"),
     getMethodID: OcaMethodID("3.1")
@@ -129,19 +118,29 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
   )
   public var mostRecentEventTime = OcaTime()
 
-  let _profilesBlock: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>
-  let _profileProxiesBlock: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>
-  var _schemaEntries = [String: _SchemaEntry]()
-  private var _nextProfileONo: OcaONo = 0
-  private var _brokerEventTask: Task<(), Never>?
-  var _eventMonitorTask: Task<(), Never>?
-  public private(set) var persistenceURL: URL?
+  public let events: AsyncStream<SwiftOCA.OcaEvent>
 
-  public func setPersistenceURL(_ url: URL?) {
-    persistenceURL = url
+  public private(set) var persistenceURL: URL?
+  public func setPersistenceURL(_ url: URL?) { persistenceURL = url }
+
+  var device: OcaDevice {
+    get throws {
+      guard let device = deviceDelegate else { throw Ocp1Error.status(.deviceError) }
+      return device
+    }
   }
 
-  public let events: AsyncStream<SwiftOCA.OcaEvent>
+  nonisolated let logger: Logger
+
+  private let connectionBroker: SwiftOCA.OcaConnectionBroker
+  private let deviceSchema: OcaDeviceSchema
+
+  private let _profilesBlock: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>
+  private let _profileProxiesBlock: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>
+  private(set) var _schemaEntries = [String: _SchemaEntry]()
+  private var _nextProfileONo: OcaONo = 0
+  private var _brokerEventTask: Task<(), Never>?
+  private var _eventMonitorTask: Task<(), Never>?
   private let _eventsContinuation: AsyncStream<SwiftOCA.OcaEvent>.Continuation
 
   private func _schemaEntry(for schemaName: String) throws -> _SchemaEntry {
@@ -157,7 +156,7 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
 
   private var _profileONoBase: OcaONo = 0
 
-  func allocateProfileONo() throws -> OcaONo {
+  private func _allocateProfileONo() throws -> OcaONo {
     let oNo = _nextProfileONo
     guard oNo < _profileONoLimit else {
       throw OcaCoordinatorError.profileONoAllocationExhausted
@@ -170,7 +169,7 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
   /// `localObjectNumber` defined in the schema. These are allocated from the same
   /// profile ONo range to ensure they remain below `ReservedONoLimit`.
   func allocateLocalONo() throws -> OcaONo {
-    try allocateProfileONo()
+    try _allocateProfileONo()
   }
 
   @OcaDevice
@@ -221,7 +220,7 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
     _profileONoBase = baseONo
     _nextProfileONo = baseONo
     await device.setEventDelegate(self)
-    startEventMonitor()
+    _startEventMonitor()
     logger.info("Coordinator initialized with schemas: \(deviceSchema.profileSchemas.map(\.name))")
   }
 
@@ -272,7 +271,7 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
     _eventsContinuation.finish()
   }
 
-  public func startEventMonitor(
+  private func _startEventMonitor(
     debounceInterval: Duration = .seconds(1)
   ) {
     _eventMonitorTask?.cancel()
@@ -377,8 +376,8 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
     }
     let profile = try await OcaProfile(
       role: uuid ?? UUID(),
-      objectNumber: allocateProfileONo(),
-      proxyBlockObjectNumber: allocateProfileONo(),
+      objectNumber: _allocateProfileONo(),
+      proxyBlockObjectNumber: _allocateProfileONo(),
       profileIndex: entry.allocateProfileIndex(),
       schema: schema,
       name: name,

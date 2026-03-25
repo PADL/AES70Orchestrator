@@ -123,12 +123,23 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
   )
   public var currentDeviceIdentifiers = [OcaString]()
 
+  @OcaDeviceProperty(
+    propertyID: OcaPropertyID("3.2"),
+    getMethodID: OcaMethodID("3.12")
+  )
+  public var mostRecentEventTime = OcaTime()
+
   let _profilesBlock: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>
   let _profileProxiesBlock: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>
   var _schemaEntries = [String: _SchemaEntry]()
   private var _nextProfileONo: OcaONo = 0
   private var _brokerEventTask: Task<(), Never>?
-  var _persistenceMonitorTask: Task<(), Never>?
+  var _eventMonitorTask: Task<(), Never>?
+  public private(set) var persistenceURL: URL?
+
+  public func setPersistenceURL(_ url: URL?) {
+    persistenceURL = url
+  }
 
   public let events: AsyncStream<SwiftOCA.OcaEvent>
   private let _eventsContinuation: AsyncStream<SwiftOCA.OcaEvent>.Continuation
@@ -210,6 +221,7 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
     _profileONoBase = baseONo
     _nextProfileONo = baseONo
     await device.setEventDelegate(self)
+    startEventMonitor()
     logger.info("Coordinator initialized with schemas: \(deviceSchema.profileSchemas.map(\.name))")
   }
 
@@ -256,8 +268,27 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
 
   deinit {
     _brokerEventTask?.cancel()
-    _persistenceMonitorTask?.cancel()
+    _eventMonitorTask?.cancel()
     _eventsContinuation.finish()
+  }
+
+  public func startEventMonitor(
+    debounceInterval: Duration = .seconds(1)
+  ) {
+    _eventMonitorTask?.cancel()
+    _eventMonitorTask = Task { [weak self] in
+      guard let self else { return }
+      for await _ in events.debounce(for: debounceInterval) {
+        mostRecentEventTime = .now
+        if let persistenceURL {
+          do {
+            try await export(to: persistenceURL)
+          } catch {
+            logger.warning("Event monitor: failed to save: \(error)")
+          }
+        }
+      }
+    }
   }
 
   private func _onDeviceAddedOrUpdated(

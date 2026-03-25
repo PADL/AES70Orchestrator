@@ -128,7 +128,7 @@ enum ExampleOrchestrator {
     }
 
     if let stateURL {
-      await coordinator.startPersistenceMonitor(url: stateURL)
+      await coordinator.setPersistenceURL(stateURL)
     }
 
     signal(SIGPIPE, SIG_IGN)

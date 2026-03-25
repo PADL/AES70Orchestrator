@@ -180,20 +180,5 @@ extension OcaCoordinator {
     logger.debug("Loaded state from blob (\(blob.wrappedValue.count) bytes)")
   }
 
-  public func startPersistenceMonitor(
-    url: URL,
-    debounceInterval: Duration = .seconds(1)
-  ) {
-    _persistenceMonitorTask?.cancel()
-    _persistenceMonitorTask = Task { [weak self] in
-      guard let self else { return }
-      for await _ in events.debounce(for: debounceInterval) {
-        do {
-          try await export(to: url)
-        } catch {
-          logger.warning("Persistence monitor: failed to save: \(error)")
-        }
-      }
-    }
-  }
+
 }

@@ -192,8 +192,10 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
   init(
     role: UUID,
     objectNumber: OcaONo,
+    proxyBlockObjectNumber: OcaONo,
     profileIndex: OcaONo,
     schema: String,
+    name: String?,
     coordinator: OcaCoordinator
   ) async throws {
     self.profileIndex = profileIndex
@@ -206,14 +208,24 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
       deviceDelegate: coordinator.device,
       addToRootBlock: false
     )
+    let proxyBlock = try await SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>(
+      objectNumber: proxyBlockObjectNumber,
+      lockable: false,
+      role: role.description,
+      deviceDelegate: coordinator.device,
+      addToRootBlock: false
+    )
+    if let name { proxyBlock.label = name }
+    try await _createLocalObjects(proxyBlock: proxyBlock)
+    self.proxyBlock = proxyBlock
+    _startLabelMonitor()
   }
 
   func objectNumber(for oNoMask: OcaONoMask?) throws -> OcaONo? {
     try oNoMask?.objectNumber(for: profileIndex)
   }
 
-  @OcaDevice
-  func createLocalObjects(
+  private func _createLocalObjects(
     proxyBlock: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>
   ) async throws {
     guard let coordinator else { throw Ocp1Error.status(.deviceError) }

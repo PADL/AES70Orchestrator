@@ -343,26 +343,17 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
     if let uuid, (try? findProfile(uuid: uuid)) != nil {
       throw OcaCoordinatorError.profileAlreadyExists
     }
-    let profileUUID = uuid ?? UUID()
     let profile = try await OcaProfile(
-      role: profileUUID,
+      role: uuid ?? UUID(),
       objectNumber: try allocateProfileONo(),
+      proxyBlockObjectNumber: try allocateProfileONo(),
       profileIndex: entry.allocateProfileIndex(),
       schema: schema,
+      name: name,
       coordinator: self
     )
-    let proxyBlock = try await SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>(
-      objectNumber: try allocateProfileONo(),
-      lockable: false,
-      role: profileUUID.description,
-      deviceDelegate: device,
-      addToRootBlock: false
-    )
-    if let name { proxyBlock.label = name }
-    try await profile.createLocalObjects(proxyBlock: proxyBlock)
-    try await entry.proxies.add(actionObject: proxyBlock)
+    try await entry.proxies.add(actionObject: profile.proxyBlock!)
     try await entry.profiles.add(actionObject: profile)
-    profile.proxyBlock = proxyBlock
     logger.debug("Added \(profile)")
     return profile.objectNumber
   }

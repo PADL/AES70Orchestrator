@@ -8,43 +8,43 @@ device:
   profiles:
     - com.padl.OCADevice:
       - Block:
-          classID: 1.1.3
+          class-id: 1.1.3
           match: 0x00002710/0x00000000
-          objectNumber: 0x00001000/0x000000F0
-          actionObjects:
+          object-number: 0x00001000/0x000000F0
+          action-objects:
             - "Actuator(0,0)":
-                classID: 1.1.1.1.1
+                class-id: 1.1.1.1.1
                 match: 0x0000271A/0x00000000
-                objectNumber: 0x00002000/0x000000F0
+                object-number: 0x00002000/0x000000F0
             - "Actuator(0,1)":
-                classID: 1.1.1.1.1
+                class-id: 1.1.1.1.1
                 match: 0x0000271B/0x00000000
-                objectNumber: 0x00002001/0x000000F0
+                object-number: 0x00002001/0x000000F0
             - "Actuator(1,0)":
-                classID: 1.1.1.1.1
+                class-id: 1.1.1.1.1
                 match: 0x0000271C/0x00000000
-                objectNumber: 0x00002002/0x000000F0
+                object-number: 0x00002002/0x000000F0
             - "Actuator(1,1)":
-                classID: 1.1.1.1.1
+                class-id: 1.1.1.1.1
                 match: 0x0000271D/0x00000000
-                objectNumber: 0x00002003/0x000000F0
+                object-number: 0x00002003/0x000000F0
             - "Actuator(2,0)":
-                classID: 1.1.1.1.1
+                class-id: 1.1.1.1.1
                 match: 0x0000271E/0x00000000
-                objectNumber: 0x00002004/0x000000F0
+                object-number: 0x00002004/0x000000F0
             - "Actuator(2,1)":
-                classID: 1.1.1.1.1
+                class-id: 1.1.1.1.1
                 match: 0x0000271F/0x00000000
-                objectNumber: 0x00002005/0x000000F0
+                object-number: 0x00002005/0x000000F0
             - "Actuator(3,0)":
-                classID: 1.1.1.1.1
+                class-id: 1.1.1.1.1
                 match: 0x00002720/0x00000000
-                objectNumber: 0x00002006/0x000000F0
+                object-number: 0x00002006/0x000000F0
             - "Actuator(3,1)":
-                classID: 1.1.1.1.1
+                class-id: 1.1.1.1.1
                 match: 0x00002721/0x00000000
-                objectNumber: 0x00002007/0x000000F0
+                object-number: 0x00002007/0x000000F0
             - Gain:
-                classID: 1.1.1.5
+                class-id: 1.1.1.5
                 match: 0x00002724/0x00000000
-                objectNumber: 0x00002010/0x000000F0
+                object-number: 0x00002010/0x000000F0

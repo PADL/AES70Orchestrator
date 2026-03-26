@@ -281,9 +281,9 @@ struct YAMLPropertyFilterTests {
       profiles:
         - TestProfile:
           - Gain:
-              classID: 1.1.1.5
+              class-id: 1.1.1.5
               match: 0x00000200/0x00000000
-              includeProperties:
+              include-props:
                 - "4.1"
                 - "3.1"
     """
@@ -301,9 +301,9 @@ struct YAMLPropertyFilterTests {
       profiles:
         - TestProfile:
           - Gain:
-              classID: 1.1.1.5
+              class-id: 1.1.1.5
               match: 0x00000200/0x00000000
-              excludeProperties:
+              exclude-props:
                 - "1.6"
     """
     let schema = try await _parseYAML(yaml)
@@ -320,12 +320,12 @@ struct YAMLPropertyFilterTests {
       profiles:
         - TestProfile:
           - Gain:
-              classID: 1.1.1.5
+              class-id: 1.1.1.5
               match: 0x00000200/0x00000000
-              includeProperties:
+              include-props:
                 - "4.1"
                 - "1.6"
-              excludeProperties:
+              exclude-props:
                 - "1.6"
     """
     let schema = try await _parseYAML(yaml)
@@ -344,7 +344,7 @@ struct YAMLPropertyFilterTests {
       profiles:
         - TestProfile:
           - Gain:
-              classID: 1.1.1.5
+              class-id: 1.1.1.5
               match: 0x00000200/0x00000000
     """
     let schema = try await _parseYAML(yaml)

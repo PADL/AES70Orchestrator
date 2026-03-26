@@ -114,7 +114,7 @@ extension OcaDeviceSchema {
 
     // parse children first to determine if this is a container
     var actionObjects = [OcaProfileObjectSchema]()
-    if let actionObjectNodes = props?["actionObjects"]?.sequence {
+    if let actionObjectNodes = (props?["action-objects"] ?? props?["members"])?.sequence {
       for child in actionObjectNodes {
         try actionObjects.append(_parseObjectSchema(child))
       }
@@ -122,7 +122,7 @@ extension OcaDeviceSchema {
 
     // resolve type from classID via registry, or infer
     let type: SwiftOCADevice.OcaRoot.Type
-    if let classIDString = props?["classID"]?.string {
+    if let classIDString = props?["class-id"]?.string {
       let classID = OcaClassID(classIDString)
       type = try OcaDeviceClassRegistry.shared.match(classID: classID)
     } else if !actionObjects.isEmpty {
@@ -140,21 +140,21 @@ extension OcaDeviceSchema {
 
     // parse optional local object number
     var localObjectNumber: OcaONoMask?
-    if let oNoString = props?["objectNumber"]?.string {
+    if let oNoString = (props?["object-number"] ?? props?["ono"])?.string {
       localObjectNumber = try OcaONoMask(oNoString)
     }
 
-    let lockRemote = props?["lockRemote"]?.bool ?? false
+    let lockRemote = props?["lock-remote"]?.bool ?? false
 
     let includeProperties: Set<OcaPropertyID>? =
-      if let seq = props?["includeProperties"]?.sequence {
+      if let seq = props?["include-props"]?.sequence {
         Set(seq.compactMap { $0.string.map { OcaPropertyID($0) } })
       } else {
         nil
       }
 
     var excludeProperties = Set<OcaPropertyID>()
-    if let seq = props?["excludeProperties"]?.sequence {
+    if let seq = props?["exclude-props"]?.sequence {
       excludeProperties = Set(seq.compactMap { $0.string.map { OcaPropertyID($0) } })
     }
 

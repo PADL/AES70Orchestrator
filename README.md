@@ -32,26 +32,30 @@ device:
   profiles:
     - OCADevice:
       - Block:
-          classID: 1.1.3
+          class-id: 1.1.3
           match: 0x00002710/0x00000000
-          objectNumber: 0x00001000/0x000000F0
-          actionObjects:
+          object-number: 0x00001000/0x000000F0
+          action-objects:
             - "Actuator(0,0)":
-                classID: 1.1.1.1.1
+                class-id: 1.1.1.1.1
                 match: 0x0000271A/0x00000000
-                objectNumber: 0x00002000/0x000000F0
+                object-number: 0x00002000/0x000000F0
             # ... more actuators ...
             - Gain:
-                classID: 1.1.1.5
+                class-id: 1.1.1.5
                 match: 0x00002724/0x00000000
-                objectNumber: 0x00002010/0x000000F0
+                object-number: 0x00002010/0x000000F0
 ```
 
 Each object in the schema specifies:
 
-- **`classID`** — dotted OCA class ID (e.g. `1.1.1.5` for `OcaGain`), resolved via the device class registry. Omit for containers with children (inferred as `OcaBlock`) or leaves (inferred as `OcaRoot`).
+- **`class-id`** — dotted OCA class ID (e.g. `1.1.1.5` for `OcaGain`), resolved via the device class registry. Omit for containers with children (inferred as `OcaBlock`) or leaves (inferred as `OcaRoot`).
 - **`match`** — remote object number and mask (`oNo/mask`). The mask bits determine how many profile instances can be bound to a single device.
-- **`objectNumber`** — optional local object number and mask for the proxy object. If omitted, the orchestrator allocates a local object number from the reserved range (below 4096) to avoid conflicts with device-assigned object numbers.
+- **`object-number`** (synonym: `ono`) — optional local object number and mask for the proxy object. If omitted, the orchestrator allocates a local object number from the reserved range (below 4096) to avoid conflicts with device-assigned object numbers.
+- **`action-objects`** (synonym: `members`) — list of child objects within a block.
+- **`lock-remote`** — if `true`, lock remote objects when bound. Defaults to `false`.
+- **`include-props`** — optional list of property IDs to forward between local and remote objects. When set, only listed properties are forwarded.
+- **`exclude-props`** — list of property IDs to never forward between local and remote objects.
 
 ### Profile-level options
 
@@ -65,7 +69,7 @@ profiles:
       autobind: true
       blocks:
         - Gain:
-            classID: 1.1.1.5
+            class-id: 1.1.1.5
             match: 0x00000200/0x0000000F
 ```
 

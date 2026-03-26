@@ -146,12 +146,26 @@ extension OcaDeviceSchema {
 
     let lockRemote = props?["lockRemote"]?.bool ?? false
 
+    let includeProperties: Set<OcaPropertyID>? =
+      if let seq = props?["includeProperties"]?.sequence {
+        Set(seq.compactMap { $0.string.map { OcaPropertyID($0) } })
+      } else {
+        nil
+      }
+
+    var excludeProperties = Set<OcaPropertyID>()
+    if let seq = props?["excludeProperties"]?.sequence {
+      excludeProperties = Set(seq.compactMap { $0.string.map { OcaPropertyID($0) } })
+    }
+
     return OcaProfileObjectSchema(
       role: role,
       type: type,
       localObjectNumber: localObjectNumber,
       remoteObjectNumber: remoteObjectNumber,
       lockRemote: lockRemote,
+      includeProperties: includeProperties,
+      excludeProperties: excludeProperties,
       actionObjectSchema: actionObjects
     )
   }

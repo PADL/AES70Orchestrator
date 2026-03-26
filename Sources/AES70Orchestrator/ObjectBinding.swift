@@ -49,6 +49,8 @@ public final class OcaObjectBinding<
 >: OcaObjectBindingRepresentable, Sendable {
   let localObject: Local
   let lockRemote: Bool
+  let includeProperties: Set<OcaPropertyID>?
+  let excludeProperties: Set<OcaPropertyID>
   var remoteObjects = [SwiftOCA.OcaConnectionBroker.DeviceIdentifier: Remote]()
   var remoteSubscriptions =
     [SwiftOCA.OcaConnectionBroker.DeviceIdentifier: Ocp1Connection.SubscriptionCancellable]()
@@ -57,9 +59,24 @@ public final class OcaObjectBinding<
 
   private static var _lockStatePropertyID: OcaPropertyID { OcaPropertyID("1.6") }
 
-  public init(localObject: Local, profile: OcaProfile, lockRemote: Bool = false) {
+  private func _shouldForwardProperty(_ propertyID: OcaPropertyID) -> Bool {
+    if let includeProperties {
+      guard includeProperties.contains(propertyID) else { return false }
+    }
+    return !excludeProperties.contains(propertyID)
+  }
+
+  public init(
+    localObject: Local,
+    profile: OcaProfile,
+    lockRemote: Bool = false,
+    includeProperties: Set<OcaPropertyID>? = nil,
+    excludeProperties: Set<OcaPropertyID> = []
+  ) {
     self.localObject = localObject
     self.lockRemote = lockRemote
+    self.includeProperties = includeProperties
+    self.excludeProperties = excludeProperties
     self.profile = profile
     profile.addObjectBinding(self, for: localObject.objectNumber)
   }
@@ -89,6 +106,7 @@ public final class OcaObjectBinding<
     }
 
     if lockRemote, eventData.propertyID == Self._lockStatePropertyID { return }
+    guard _shouldForwardProperty(eventData.propertyID) else { return }
 
     profile?.coordinator?.logger.trace(
       "handleLocalEvent: forwarding propertyID \(eventData.propertyID) to \(remoteObjects.count) remote object(s)"
@@ -116,6 +134,8 @@ public final class OcaObjectBinding<
 
     _forwardingFromRemote = true
     defer { _forwardingFromRemote = false }
+
+    guard _shouldForwardProperty(eventData.propertyID) else { return }
 
     // don't forward lockState changes to the local object when lockRemote is set
     if !(lockRemote && eventData.propertyID == Self._lockStatePropertyID) {

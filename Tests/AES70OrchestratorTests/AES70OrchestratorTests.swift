@@ -128,6 +128,69 @@ struct OcaProfileObjectSchemaTests {
   }
 
   @Test
+  func shouldForwardPropertyDefaultsAllowAll() {
+    let schema = OcaProfileObjectSchema(
+      role: "Gain",
+      type: SwiftOCADevice.OcaGain.self,
+      remoteObjectNumber: OcaONoMask(oNo: 0x200, mask: 0x0F)
+    )
+    #expect(schema.includeProperties == nil)
+    #expect(schema.excludeProperties.isEmpty)
+    #expect(schema.shouldForwardProperty(OcaPropertyID("4.1")))
+    #expect(schema.shouldForwardProperty(OcaPropertyID("1.6")))
+  }
+
+  @Test
+  func shouldForwardPropertyIncludeOnly() {
+    let schema = OcaProfileObjectSchema(
+      role: "Gain",
+      type: SwiftOCADevice.OcaGain.self,
+      remoteObjectNumber: OcaONoMask(oNo: 0x200, mask: 0x0F),
+      includeProperties: [OcaPropertyID("4.1")]
+    )
+    #expect(schema.shouldForwardProperty(OcaPropertyID("4.1")))
+    #expect(!schema.shouldForwardProperty(OcaPropertyID("3.1")))
+  }
+
+  @Test
+  func shouldForwardPropertyIncludeEmptyBlocksAll() {
+    let schema = OcaProfileObjectSchema(
+      role: "Gain",
+      type: SwiftOCADevice.OcaGain.self,
+      remoteObjectNumber: OcaONoMask(oNo: 0x200, mask: 0x0F),
+      includeProperties: []
+    )
+    #expect(!schema.shouldForwardProperty(OcaPropertyID("4.1")))
+    #expect(!schema.shouldForwardProperty(OcaPropertyID("1.1")))
+  }
+
+  @Test
+  func shouldForwardPropertyExclude() {
+    let schema = OcaProfileObjectSchema(
+      role: "Gain",
+      type: SwiftOCADevice.OcaGain.self,
+      remoteObjectNumber: OcaONoMask(oNo: 0x200, mask: 0x0F),
+      excludeProperties: [OcaPropertyID("1.6")]
+    )
+    #expect(schema.shouldForwardProperty(OcaPropertyID("4.1")))
+    #expect(!schema.shouldForwardProperty(OcaPropertyID("1.6")))
+  }
+
+  @Test
+  func shouldForwardPropertyIncludeAndExclude() {
+    let schema = OcaProfileObjectSchema(
+      role: "Gain",
+      type: SwiftOCADevice.OcaGain.self,
+      remoteObjectNumber: OcaONoMask(oNo: 0x200, mask: 0x0F),
+      includeProperties: [OcaPropertyID("4.1"), OcaPropertyID("1.6")],
+      excludeProperties: [OcaPropertyID("1.6")]
+    )
+    #expect(schema.shouldForwardProperty(OcaPropertyID("4.1")))
+    #expect(!schema.shouldForwardProperty(OcaPropertyID("1.6")))
+    #expect(!schema.shouldForwardProperty(OcaPropertyID("3.1")))
+  }
+
+  @Test
   func applyRecursiveVisitsAllNodes() async throws {
     let child1 = OcaProfileObjectSchema(
       role: "Gain",
@@ -198,6 +261,96 @@ struct OcaDeviceSchemaTests {
     #expect(deviceSchema.models == nil)
     #expect(deviceSchema.profileSchemas.count == 1)
     #expect(deviceSchema.profileSchemas[0].name == "gain")
+  }
+}
+
+// MARK: - YAML property filter parsing tests
+
+@OcaDevice
+private func _parseYAML(_ yaml: String) throws -> OcaDeviceSchema {
+  try OcaDeviceSchema(yaml: yaml)
+}
+
+@Suite
+struct YAMLPropertyFilterTests {
+  @Test
+  func includePropertiesParsedFromYAML() async throws {
+    let yaml = """
+    device:
+      name: Test
+      profiles:
+        - TestProfile:
+          - Gain:
+              classID: 1.1.1.5
+              match: 0x00000200/0x00000000
+              includeProperties:
+                - "4.1"
+                - "3.1"
+    """
+    let schema = try await _parseYAML(yaml)
+    let gain = schema.profileSchemas[0].blocks[0]
+    #expect(gain.includeProperties == Set([OcaPropertyID("4.1"), OcaPropertyID("3.1")]))
+    #expect(gain.excludeProperties.isEmpty)
+  }
+
+  @Test
+  func excludePropertiesParsedFromYAML() async throws {
+    let yaml = """
+    device:
+      name: Test
+      profiles:
+        - TestProfile:
+          - Gain:
+              classID: 1.1.1.5
+              match: 0x00000200/0x00000000
+              excludeProperties:
+                - "1.6"
+    """
+    let schema = try await _parseYAML(yaml)
+    let gain = schema.profileSchemas[0].blocks[0]
+    #expect(gain.includeProperties == nil)
+    #expect(gain.excludeProperties == Set([OcaPropertyID("1.6")]))
+  }
+
+  @Test
+  func bothIncludeAndExcludeParsedFromYAML() async throws {
+    let yaml = """
+    device:
+      name: Test
+      profiles:
+        - TestProfile:
+          - Gain:
+              classID: 1.1.1.5
+              match: 0x00000200/0x00000000
+              includeProperties:
+                - "4.1"
+                - "1.6"
+              excludeProperties:
+                - "1.6"
+    """
+    let schema = try await _parseYAML(yaml)
+    let gain = schema.profileSchemas[0].blocks[0]
+    #expect(gain.includeProperties == Set([OcaPropertyID("4.1"), OcaPropertyID("1.6")]))
+    #expect(gain.excludeProperties == Set([OcaPropertyID("1.6")]))
+    #expect(gain.shouldForwardProperty(OcaPropertyID("4.1")))
+    #expect(!gain.shouldForwardProperty(OcaPropertyID("1.6")))
+  }
+
+  @Test
+  func omittedPropertyFiltersDefaultCorrectly() async throws {
+    let yaml = """
+    device:
+      name: Test
+      profiles:
+        - TestProfile:
+          - Gain:
+              classID: 1.1.1.5
+              match: 0x00000200/0x00000000
+    """
+    let schema = try await _parseYAML(yaml)
+    let gain = schema.profileSchemas[0].blocks[0]
+    #expect(gain.includeProperties == nil)
+    #expect(gain.excludeProperties.isEmpty)
   }
 }
 

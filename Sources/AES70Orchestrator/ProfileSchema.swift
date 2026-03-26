@@ -118,11 +118,24 @@ public struct OcaProfileObjectSchema: Sendable, CustomStringConvertible {
   // if true, the remote object is locked when bound and unlocked when unbound
   public let lockRemote: Bool
 
+  // if non-nil, only these properties are forwarded (empty set means no properties)
+  public let includeProperties: Set<OcaPropertyID>?
+
+  // these properties are never forwarded
+  public let excludeProperties: Set<OcaPropertyID>
+
   public let actionObjectSchema: [Self]
 
   public var description: String {
     let children = actionObjectSchema.isEmpty ? "" : ", children: \(actionObjectSchema.count)"
     return "OcaProfileObjectSchema(role: \(role), type: \(type), remote: \(remoteObjectNumber)\(children))"
+  }
+
+  public func shouldForwardProperty(_ propertyID: OcaPropertyID) -> Bool {
+    if let includeProperties {
+      guard includeProperties.contains(propertyID) else { return false }
+    }
+    return !excludeProperties.contains(propertyID)
   }
 
   public init(
@@ -131,6 +144,8 @@ public struct OcaProfileObjectSchema: Sendable, CustomStringConvertible {
     localObjectNumber: OcaONoMask? = nil,
     remoteObjectNumber: OcaONoMask,
     lockRemote: Bool = false,
+    includeProperties: Set<OcaPropertyID>? = nil,
+    excludeProperties: Set<OcaPropertyID> = [],
     actionObjectSchema: [Self] = []
   ) {
     self.role = role
@@ -138,6 +153,8 @@ public struct OcaProfileObjectSchema: Sendable, CustomStringConvertible {
     self.localObjectNumber = localObjectNumber
     self.remoteObjectNumber = remoteObjectNumber
     self.lockRemote = lockRemote
+    self.includeProperties = includeProperties
+    self.excludeProperties = excludeProperties
     self.actionObjectSchema = actionObjectSchema
   }
 

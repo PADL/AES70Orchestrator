@@ -82,6 +82,9 @@ public struct OcaONoMask: Sendable, Equatable, CustomStringConvertible {
 public struct OcaProfileObjectSchema: Sendable, CustomStringConvertible {
   public let role: String
 
+  // the class ID declared in the schema, if present
+  public let declaredClassID: OcaClassID?
+
   // the OCA class ID for the profile entry
   public let type: SwiftOCADevice.OcaRoot.Type
 
@@ -140,6 +143,7 @@ public struct OcaProfileObjectSchema: Sendable, CustomStringConvertible {
 
   public init(
     role: String,
+    declaredClassID: OcaClassID? = nil,
     type: SwiftOCADevice.OcaRoot.Type,
     localObjectNumber: OcaONoMask? = nil,
     remoteObjectNumber: OcaONoMask,
@@ -149,6 +153,7 @@ public struct OcaProfileObjectSchema: Sendable, CustomStringConvertible {
     actionObjectSchema: [Self] = []
   ) {
     self.role = role
+    self.declaredClassID = declaredClassID
     self.type = type
     self.localObjectNumber = localObjectNumber
     self.remoteObjectNumber = remoteObjectNumber
@@ -162,7 +167,14 @@ public struct OcaProfileObjectSchema: Sendable, CustomStringConvertible {
     objectNumber: OcaONo? = nil,
     deviceDelegate: OcaDevice?
   ) async throws -> SwiftOCADevice.OcaRoot {
-    try await type.init(
+    let resolvedType =
+      if let declaredClassID {
+        try await OcaDeviceClassRegistry.shared.match(classID: declaredClassID)
+      } else {
+        type
+      }
+
+    return try await resolvedType.init(
       objectNumber: objectNumber,
       role: role,
       deviceDelegate: deviceDelegate,

@@ -133,9 +133,11 @@ extension OcaDeviceSchema {
     }
 
     // resolve type from classID via registry, or infer
+    let declaredClassID = Self._node(in: props, keys: ["class-id", "classID"])?
+      .string
+      .map { OcaClassID($0) }
     let type: SwiftOCADevice.OcaRoot.Type
-    if let classIDString = Self._node(in: props, keys: ["class-id", "classID"])?.string {
-      let classID = OcaClassID(classIDString)
+    if let classID = declaredClassID {
       type = try OcaDeviceClassRegistry.shared.match(classID: classID)
     } else if !actionObjects.isEmpty {
       type = SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>.self
@@ -172,6 +174,7 @@ extension OcaDeviceSchema {
 
     return OcaProfileObjectSchema(
       role: role,
+      declaredClassID: declaredClassID,
       type: type,
       localObjectNumber: localObjectNumber,
       remoteObjectNumber: remoteObjectNumber,

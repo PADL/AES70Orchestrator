@@ -242,7 +242,11 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
   }
 
   func objectNumber(for oNoMask: OcaONoMask?) throws -> OcaONo? {
-    try oNoMask?.objectNumber(for: profileIndex)
+    guard let oNoMask else { return nil }
+    if oNoMask.mask == 0 {
+      return oNoMask.oNo
+    }
+    return try oNoMask.objectNumber(for: profileIndex)
   }
 
   private func _createLocalObjects(
@@ -292,7 +296,7 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     for block in schema.blocks {
       try block.applyRecursive { objectSchema, _, _ in
         guard let localONoMask = objectSchema.localObjectNumber else { return }
-        let actualONo = try localONoMask.objectNumber(for: profileIndex)
+        guard let actualONo = try objectNumber(for: localONoMask) else { return }
         map[actualONo] = localONoMask
       }
     }
@@ -317,7 +321,7 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
         // find the mask entry whose base matches this masked ONo
         for (_, mask) in oNoMap {
           if mask.maskedObjectNumber(for: oNo) == oNo {
-            result["_oNo"] = try? mask.objectNumber(for: profileIndex)
+            result["_oNo"] = try? objectNumber(for: mask)
             break
           }
         }

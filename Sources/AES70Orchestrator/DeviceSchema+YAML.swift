@@ -19,6 +19,16 @@ import SwiftOCA
 import Yams
 
 extension OcaDeviceSchema {
+  private static func _node(in mapping: Node.Mapping?, keys: [String]) -> Node? {
+    guard let mapping else { return nil }
+    for key in keys {
+      if let node = mapping[key] {
+        return node
+      }
+    }
+    return nil
+  }
+
   @OcaDevice
   public init(yaml: String) throws {
     guard let doc = try Yams.compose(yaml: yaml),
@@ -114,7 +124,9 @@ extension OcaDeviceSchema {
 
     // parse children first to determine if this is a container
     var actionObjects = [OcaProfileObjectSchema]()
-    if let actionObjectNodes = (props?["action-objects"] ?? props?["members"])?.sequence {
+    if let actionObjectNodes = Self._node(in: props, keys: ["action-objects", "actionObjects", "members"])?
+      .sequence
+    {
       for child in actionObjectNodes {
         try actionObjects.append(_parseObjectSchema(child))
       }
@@ -122,7 +134,7 @@ extension OcaDeviceSchema {
 
     // resolve type from classID via registry, or infer
     let type: SwiftOCADevice.OcaRoot.Type
-    if let classIDString = props?["class-id"]?.string {
+    if let classIDString = Self._node(in: props, keys: ["class-id", "classID"])?.string {
       let classID = OcaClassID(classIDString)
       type = try OcaDeviceClassRegistry.shared.match(classID: classID)
     } else if !actionObjects.isEmpty {
@@ -140,21 +152,21 @@ extension OcaDeviceSchema {
 
     // parse optional local object number
     var localObjectNumber: OcaONoMask?
-    if let oNoString = (props?["object-number"] ?? props?["ono"])?.string {
+    if let oNoString = Self._node(in: props, keys: ["object-number", "objectNumber", "ono", "oNo"])?.string {
       localObjectNumber = try OcaONoMask(oNoString)
     }
 
-    let lockRemote = props?["lock-remote"]?.bool ?? false
+    let lockRemote = Self._node(in: props, keys: ["lock-remote", "lockRemote"])?.bool ?? false
 
     let includeProperties: Set<OcaPropertyID>? =
-      if let seq = props?["include-props"]?.sequence {
+      if let seq = Self._node(in: props, keys: ["include-props", "includeProperties"])?.sequence {
         Set(seq.compactMap { $0.string.map { OcaPropertyID($0) } })
       } else {
         nil
       }
 
     var excludeProperties = Set<OcaPropertyID>()
-    if let seq = props?["exclude-props"]?.sequence {
+    if let seq = Self._node(in: props, keys: ["exclude-props", "excludeProperties"])?.sequence {
       excludeProperties = Set(seq.compactMap { $0.string.map { OcaPropertyID($0) } })
     }
 

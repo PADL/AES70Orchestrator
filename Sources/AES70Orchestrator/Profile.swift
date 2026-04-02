@@ -327,11 +327,9 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
         result["_oNo"] = mask.maskedObjectNumber(for: oNo)
       } else if !toMasked {
         // find the mask entry whose base matches this masked ONo
-        for (_, mask) in oNoMap {
-          if mask.maskedObjectNumber(for: oNo) == oNo {
-            result["_oNo"] = try? objectNumber(for: mask)
-            break
-          }
+        for (_, mask) in oNoMap where mask.oNo == oNo {
+          result["_oNo"] = try? objectNumber(for: mask)
+          break
         }
       }
     }

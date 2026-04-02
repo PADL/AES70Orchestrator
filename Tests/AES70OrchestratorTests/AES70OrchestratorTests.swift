@@ -517,8 +517,53 @@ struct CoordinatorTests {
     let oNo2 = try await coordinator.addProfile(schema: "SimpleSwitch")
     let p1 = try await coordinator._findProfile(oNo: oNo1)
     let p2 = try await coordinator._findProfile(oNo: oNo2)
-    #expect(await p1.profileIndex == 0)
-    #expect(await p2.profileIndex == 0)
+    #expect(await p1.profileIndex == 1)
+    #expect(await p2.profileIndex == 1)
+  }
+
+  @Test
+  func profileIndexSkipsConflictingLocalObjectNumbers() async throws {
+    let collidingSchema = OcaProfileObjectSchema(
+      role: "Inputs",
+      type: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>.self,
+      localObjectNumber: OcaONoMask(oNo: 0x00000001, mask: 0x0F000000),
+      remoteObjectNumber: OcaONoMask(oNo: 0x00000100, mask: 0x0000000F),
+      actionObjectSchema: [
+        OcaProfileObjectSchema(
+          role: "Input 1",
+          type: SwiftOCADevice.OcaGain.self,
+          localObjectNumber: OcaONoMask(oNo: 0x00000005, mask: 0x0F000000),
+          remoteObjectNumber: OcaONoMask(oNo: 0x00000200, mask: 0x0000000F)
+        )
+      ]
+    )
+    let deviceSchema = OcaDeviceSchema(
+      name: "TestDevice",
+      profileSchemas: [OcaProfileSchema(name: "Colliding", blocks: [collidingSchema])]
+    )
+
+    let device = OcaDevice()
+    try await device.initializeDefaultObjects()
+    let broker = await OcaConnectionBroker(
+      connectionOptions: .init(),
+      serviceTypes: nil,
+      deviceModels: nil
+    )
+    let coordinator = try await OcaCoordinator(
+      connectionBroker: broker,
+      deviceSchema: deviceSchema,
+      deviceDelegate: device
+    )
+
+    let oNo = try await coordinator.addProfile(schema: "Colliding")
+    let profile = try await coordinator._findProfile(oNo: oNo)
+
+    #expect(await profile.profileIndex == 1)
+
+    let blockONo = try OcaONoMask(oNo: 0x00000001, mask: 0x0F000000).objectNumber(for: 1)
+    let inputONo = try OcaONoMask(oNo: 0x00000005, mask: 0x0F000000).objectNumber(for: 1)
+    #expect(await profile.objectBinding(for: blockONo) != nil)
+    #expect(await profile.objectBinding(for: inputONo) != nil)
   }
 
   @Test
@@ -527,9 +572,9 @@ struct CoordinatorTests {
     let oNo = try await coordinator.addProfile(schema: "ChannelStrip")
     let profile = try await coordinator._findProfile(oNo: oNo)
     // channel block schema creates 3 local objects: block, gain, mute
-    let blockONo = try OcaONoMask(oNo: 0x1000, mask: 0x0F).objectNumber(for: 0)
-    let gainONo = try OcaONoMask(oNo: 0x2000, mask: 0x0F).objectNumber(for: 0)
-    let muteONo = try OcaONoMask(oNo: 0x3000, mask: 0x0F).objectNumber(for: 0)
+    let blockONo = try OcaONoMask(oNo: 0x1000, mask: 0x0F).objectNumber(for: 1)
+    let gainONo = try OcaONoMask(oNo: 0x2000, mask: 0x0F).objectNumber(for: 1)
+    let muteONo = try OcaONoMask(oNo: 0x3000, mask: 0x0F).objectNumber(for: 1)
     #expect(await profile.objectBinding(for: blockONo) != nil)
     #expect(await profile.objectBinding(for: gainONo) != nil)
     #expect(await profile.objectBinding(for: muteONo) != nil)
@@ -785,9 +830,9 @@ struct PersistenceTests {
     let restored = try await coordinator2.findProfile(uuid: uuid)
     #expect(await restored.proxyBlock != nil)
     // verify local objects exist in the restored profile
-    let blockONo = try OcaONoMask(oNo: 0x1000, mask: 0x0F).objectNumber(for: 0)
-    let gainONo = try OcaONoMask(oNo: 0x2000, mask: 0x0F).objectNumber(for: 0)
-    let muteONo = try OcaONoMask(oNo: 0x3000, mask: 0x0F).objectNumber(for: 0)
+    let blockONo = try OcaONoMask(oNo: 0x1000, mask: 0x0F).objectNumber(for: 1)
+    let gainONo = try OcaONoMask(oNo: 0x2000, mask: 0x0F).objectNumber(for: 1)
+    let muteONo = try OcaONoMask(oNo: 0x3000, mask: 0x0F).objectNumber(for: 1)
     #expect(await restored.objectBinding(for: blockONo) != nil)
     #expect(await restored.objectBinding(for: gainONo) != nil)
     #expect(await restored.objectBinding(for: muteONo) != nil)

@@ -57,7 +57,7 @@ public enum OcaCoordinatorError: Error {
 final class _SchemaEntry {
   let profiles: SwiftOCADevice.OcaBlock<OcaProfile>
   let proxies: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>
-  var nextProfileIndex: OcaONo = 0
+  var nextProfileIndex: OcaONo = 1
   var deviceIndices = [SwiftOCA.OcaConnectionBroker.DeviceIdentifier: Set<OcaONo>]()
 
   init(
@@ -93,6 +93,7 @@ final class _SchemaEntry {
     nextProfileIndex += 1
     return index
   }
+
 }
 
 /// The central coordinator that manages profile lifecycle, device discovery, and binding.

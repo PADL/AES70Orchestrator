@@ -34,4 +34,10 @@ open class OcaProfile: SwiftOCA.OcaAgent, @unchecked Sendable {
     getMethodID: OcaMethodID("3.3")
   )
   public var boundDevices: OcaListProperty<OcaString>.PropertyValue
+
+  @OcaProperty(
+    propertyID: OcaPropertyID("3.3"),
+    getMethodID: OcaMethodID("3.4")
+  )
+  public var boundDeviceIndices: OcaMapProperty<OcaString, OcaONo>.PropertyValue
 }

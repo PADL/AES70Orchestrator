@@ -22,9 +22,30 @@ import ZIPFoundation
 
 private let ArchiveVersion = "v0"
 
+private struct _ProfileManifestBinding: Codable {
+  let deviceID: String
+  let deviceIndex: OcaONo?
+}
+
 private struct _ProfileManifestEntry: Codable {
   let name: String?
-  let devices: [String]
+  let bindings: [_ProfileManifestBinding]
+  let devices: [String]?
+
+  init(name: String?, bindings: [_ProfileManifestBinding]) {
+    self.name = name
+    self.bindings = bindings
+    devices = nil
+  }
+
+  var restoredBindings: [_ProfileManifestBinding] {
+    if !bindings.isEmpty {
+      return bindings
+    }
+    return (devices ?? []).map { deviceID in
+      _ProfileManifestBinding(deviceID: deviceID, deviceIndex: nil)
+    }
+  }
 }
 
 extension OcaCoordinator {
@@ -62,7 +83,12 @@ extension OcaCoordinator {
         let uuid = profile.role
         manifest[uuid] = _ProfileManifestEntry(
           name: profile.label,
-          devices: profile.boundDevices
+          bindings: profile.boundDevices.map { deviceID in
+            _ProfileManifestBinding(
+              deviceID: deviceID,
+              deviceIndex: profile.boundDeviceIndices[deviceID]
+            )
+          }
         )
       }
       let devicesData = try encoder.encode(manifest)
@@ -112,12 +138,12 @@ extension OcaCoordinator {
         let profile = try _findProfile(oNo: profileONo)
 
         // restore bound devices
-        for deviceID in entry.devices {
-          guard let deviceIdentifier = OcaConnectionBroker.DeviceIdentifier(deviceID) else {
-            logger.warning("load: invalid device identifier \(deviceID)")
+        for binding in entry.restoredBindings {
+          guard let deviceIdentifier = OcaConnectionBroker.DeviceIdentifier(binding.deviceID) else {
+            logger.warning("load: invalid device identifier \(binding.deviceID)")
             continue
           }
-          try bindProfile(profile, to: deviceIdentifier)
+          try bindProfile(profile, to: deviceIdentifier, deviceIndex: binding.deviceIndex)
         }
 
         // restore profile state with ONo remapping

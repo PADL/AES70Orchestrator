@@ -736,7 +736,11 @@ struct PersistenceTests {
 
     // bind a device to the first profile
     let profile1 = try await coordinator.findProfile(uuid: uuid1)
-    try await coordinator.bindProfile(profile1, to: Self._testDeviceIdentifier)
+    try await coordinator.bindProfile(
+      profile1,
+      to: Self._testDeviceIdentifier,
+      deviceIndex: 2
+    )
 
     // save
     let tempURL = FileManager.default.temporaryDirectory
@@ -760,7 +764,7 @@ struct PersistenceTests {
 
     // verify binding was restored
     #expect(await restored1.boundDevices.contains(Self._testDeviceIdentifier.id))
-    #expect(await restored1.deviceIndices[Self._testDeviceIdentifier] != nil)
+    #expect(await restored1.deviceIndices[Self._testDeviceIdentifier] == 2)
   }
 
   @Test
@@ -862,6 +866,13 @@ struct PersistenceTests {
 }
 
 // MARK: - YAML schema parsing tests
+
+@OcaDevice
+final class _LateRegisteredLevelSensor: SwiftOCADevice.OcaLevelSensor {
+  override class var classID: OcaClassID {
+    OcaClassID(parent: SwiftOCADevice.OcaLevelSensor.classID, authority: PADLCompanyID, 999)
+  }
+}
 
 @Suite
 struct YAMLSchemaTests {
@@ -1043,6 +1054,33 @@ struct YAMLSchemaTests {
   func parseLockRemoteDefaultsFalse() async throws {
     let schema = try await OcaDeviceSchema(yaml: Self._minimalYAML)
     #expect(schema.profileSchemas[0].blocks[0].lockRemote == false)
+  }
+
+  @Test
+  func createLocalObjectReResolvesDeclaredClassID() async throws {
+    let yaml = """
+    device:
+      name: ProprietaryDevice
+      profiles:
+        - ProprietaryProfile:
+          - Sensor:
+              classID: \(_LateRegisteredLevelSensor.classID)
+              match: 0x00000200/0x00000000
+              objectNumber: 0x00002000/0x00000000
+    """
+
+    let schema = try await OcaDeviceSchema(yaml: yaml)
+    let sensorSchema = schema.profileSchemas[0].blocks[0]
+
+    #expect(sensorSchema.declaredClassID == _LateRegisteredLevelSensor.classID)
+    #expect(sensorSchema.type == SwiftOCADevice.OcaLevelSensor.self)
+
+    try? await OcaDeviceClassRegistry.shared.register(_LateRegisteredLevelSensor.self)
+
+    let sensor = try await sensorSchema.createLocalObject(objectNumber: 0x2000, deviceDelegate: nil)
+    let sensorClassID = await sensor.objectIdentification.classIdentification.classID
+    #expect(type(of: sensor) == _LateRegisteredLevelSensor.self)
+    #expect(sensorClassID == _LateRegisteredLevelSensor.classID)
   }
 }
 

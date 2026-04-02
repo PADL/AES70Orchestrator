@@ -102,7 +102,13 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
   )
   public private(set) var boundDevices = [String]()
 
-  // maps device identifier to its allocated device index (not exposed via OCA)
+  @OcaDeviceProperty(
+    propertyID: OcaPropertyID("3.3"),
+    getMethodID: OcaMethodID("3.4")
+  )
+  public private(set) var boundDeviceIndices = [String: OcaONo]()
+
+  // maps device identifier to its allocated device index for activation lookups
   private(set) var deviceIndices = [SwiftOCA.OcaConnectionBroker.DeviceIdentifier: OcaONo]()
 
   func bindDevice(
@@ -110,6 +116,7 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     index: OcaONo
   ) {
     deviceIndices[deviceIdentifier] = index
+    boundDeviceIndices[deviceIdentifier.id] = index
     boundDevices.append(deviceIdentifier.id)
   }
 
@@ -117,6 +124,7 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     _ deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
   ) {
     deviceIndices.removeValue(forKey: deviceIdentifier)
+    boundDeviceIndices.removeValue(forKey: deviceIdentifier.id)
     boundDevices.removeAll { $0 == deviceIdentifier.id }
   }
 

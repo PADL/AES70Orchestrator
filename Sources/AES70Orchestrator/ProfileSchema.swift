@@ -17,6 +17,16 @@
 import SwiftOCA
 import SwiftOCADevice
 
+/// Describes a property whose payload contains object references that must be remapped between
+/// local profile-space ONos and remote device-space ONos.
+public struct OcaProfileReferencePropertySchema: Sendable, Equatable {
+  public let targetMatch: OcaONoMask
+
+  public init(targetMatch: OcaONoMask) {
+    self.targetMatch = targetMatch
+  }
+}
+
 /// A struct that pairs a base OCA object number with a bitmask. The mask bits determine
 /// how many instances can be numbered within the base object number. For example,
 /// `OcaONoMask(oNo: 0x100, mask: 0x0F)` allows 16 instances (0x100–0x10F).
@@ -127,6 +137,9 @@ public struct OcaProfileObjectSchema: Sendable, CustomStringConvertible {
   // these properties are never forwarded
   public let excludeProperties: Set<OcaPropertyID>
 
+  // properties whose payload contains ONo references that must be translated at bind/sync time
+  public let referenceProperties: [OcaPropertyID: OcaProfileReferencePropertySchema]
+
   public let actionObjectSchema: [Self]
 
   public var description: String {
@@ -141,6 +154,12 @@ public struct OcaProfileObjectSchema: Sendable, CustomStringConvertible {
     return !excludeProperties.contains(propertyID)
   }
 
+  public func referenceProperty(
+    for propertyID: OcaPropertyID
+  ) -> OcaProfileReferencePropertySchema? {
+    referenceProperties[propertyID]
+  }
+
   public init(
     role: String,
     declaredClassID: OcaClassID? = nil,
@@ -150,6 +169,7 @@ public struct OcaProfileObjectSchema: Sendable, CustomStringConvertible {
     lockRemote: Bool = false,
     includeProperties: Set<OcaPropertyID>? = nil,
     excludeProperties: Set<OcaPropertyID> = [],
+    referenceProperties: [OcaPropertyID: OcaProfileReferencePropertySchema] = [:],
     actionObjectSchema: [Self] = []
   ) {
     self.role = role
@@ -160,6 +180,7 @@ public struct OcaProfileObjectSchema: Sendable, CustomStringConvertible {
     self.lockRemote = lockRemote
     self.includeProperties = includeProperties
     self.excludeProperties = excludeProperties
+    self.referenceProperties = referenceProperties
     self.actionObjectSchema = actionObjectSchema
   }
 

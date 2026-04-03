@@ -191,6 +191,22 @@ struct OcaProfileObjectSchemaTests {
   }
 
   @Test
+  func referencePropertyMetadataStored() {
+    let targetMatch = OcaONoMask(oNo: 0x4000_0010, mask: 0x0300_0000)
+    let schema = OcaProfileObjectSchema(
+      role: "Group",
+      type: SwiftOCADevice.OcaGroup<SwiftOCADevice.OcaGain>.self,
+      remoteObjectNumber: OcaONoMask(oNo: 0x4000_0030, mask: 0x0300_0000),
+      referenceProperties: [
+        OcaPropertyID("3.1"): OcaProfileReferencePropertySchema(targetMatch: targetMatch),
+      ]
+    )
+
+    #expect(schema.referenceProperty(for: OcaPropertyID("3.1"))?.targetMatch == targetMatch)
+    #expect(schema.referenceProperty(for: OcaPropertyID("3.2")) == nil)
+  }
+
+  @Test
   func applyRecursiveVisitsAllNodes() async throws {
     let child1 = OcaProfileObjectSchema(
       role: "Gain",
@@ -351,6 +367,139 @@ struct YAMLPropertyFilterTests {
     let gain = schema.profileSchemas[0].blocks[0]
     #expect(gain.includeProperties == nil)
     #expect(gain.excludeProperties.isEmpty)
+  }
+
+  @Test
+  func referencePropertiesParsedFromYAML() async throws {
+    let yaml = """
+    device:
+      name: Test
+      profiles:
+        - TestProfile:
+          - Group:
+              class-id: 1.2.22
+              match: 0x40000030/0x03000000
+              reference-props:
+                "3.1":
+                  target-match: 0x40000010/0x03000000
+                "3.2": 0x40000010/0x03000000
+    """
+    let schema = try await _parseYAML(yaml)
+    let group = schema.profileSchemas[0].blocks[0]
+    let targetMatch = OcaONoMask(oNo: 0x4000_0010, mask: 0x0300_0000)
+
+    #expect(group.referenceProperty(for: OcaPropertyID("3.1"))?.targetMatch == targetMatch)
+    #expect(group.referenceProperty(for: OcaPropertyID("3.2"))?.targetMatch == targetMatch)
+  }
+}
+
+// MARK: - Reference remapping tests
+
+@Suite
+struct ReferenceRemappingTests {
+  static let localMask = OcaONoMask(oNo: 0, mask: 0x0F00_0000)
+  static let remoteMask = OcaONoMask(oNo: 0x4000_0000, mask: 0x0300_0000)
+  static let referenceTargetMatch = OcaONoMask(oNo: 0x4000_0010, mask: 0x0300_0000)
+
+  static func _makeSchema() -> OcaDeviceSchema {
+    let gain1 = OcaProfileObjectSchema(
+      role: "Gain 1",
+      type: SwiftOCADevice.OcaGain.self,
+      localObjectNumber: OcaONoMask(oNo: 0x0000_0010, mask: localMask.mask),
+      remoteObjectNumber: OcaONoMask(oNo: 0x4000_0010, mask: remoteMask.mask)
+    )
+    let gain2 = OcaProfileObjectSchema(
+      role: "Gain 2",
+      type: SwiftOCADevice.OcaGain.self,
+      localObjectNumber: OcaONoMask(oNo: 0x0000_0020, mask: localMask.mask),
+      remoteObjectNumber: OcaONoMask(oNo: 0x4000_0020, mask: remoteMask.mask)
+    )
+    let group = OcaProfileObjectSchema(
+      role: "Group",
+      type: SwiftOCADevice.OcaGroup<SwiftOCADevice.OcaGain>.self,
+      localObjectNumber: OcaONoMask(oNo: 0x0000_0030, mask: localMask.mask),
+      remoteObjectNumber: OcaONoMask(oNo: 0x4000_0030, mask: remoteMask.mask),
+      referenceProperties: [
+        OcaPropertyID("3.1"): OcaProfileReferencePropertySchema(targetMatch: referenceTargetMatch),
+        OcaPropertyID("3.2"): OcaProfileReferencePropertySchema(targetMatch: referenceTargetMatch),
+      ]
+    )
+
+    return OcaDeviceSchema(
+      name: "ReferenceDevice",
+      profileSchemas: [OcaProfileSchema(name: "References", blocks: [gain1, gain2, group])]
+    )
+  }
+
+  @OcaDevice
+  static func _makeProfile() async throws -> OcaProfile {
+    let device = OcaDevice()
+    try await device.initializeDefaultObjects()
+
+    let broker = await OcaConnectionBroker(
+      connectionOptions: .init(),
+      serviceTypes: nil,
+      deviceModels: nil
+    )
+    let coordinator = try await OcaCoordinator(
+      connectionBroker: broker,
+      deviceSchema: _makeSchema(),
+      deviceDelegate: device
+    )
+    let profileONo = try await coordinator.addProfile(schema: "References")
+    return try await coordinator._findProfile(oNo: profileONo)
+  }
+
+  @Test
+  func scalarReferenceONoRemapsBetweenLocalAndRemote() async throws {
+    let profile = try await Self._makeProfile()
+    let localGainONo = try OcaONoMask(oNo: 0x0000_0010, mask: Self.localMask.mask)
+      .objectNumber(for: 1)
+    let remoteGainONo = try OcaONoMask(oNo: 0x4000_0010, mask: Self.remoteMask.mask)
+      .objectNumber(for: 2)
+
+    #expect(
+      try await profile.remapReferenceONoToRemote(
+        localGainONo,
+        targetMatch: Self.referenceTargetMatch,
+        deviceIndex: 2
+      ) == remoteGainONo
+    )
+    #expect(
+      try await profile.remapReferenceONoToLocal(
+        remoteGainONo,
+        targetMatch: Self.referenceTargetMatch,
+        deviceIndex: 2
+      ) == localGainONo
+    )
+  }
+
+  @Test
+  func arrayReferenceONosRemapBetweenLocalAndRemote() async throws {
+    let profile = try await Self._makeProfile()
+    let localONos = try [
+      OcaONoMask(oNo: 0x0000_0010, mask: Self.localMask.mask).objectNumber(for: 1),
+      OcaONoMask(oNo: 0x0000_0020, mask: Self.localMask.mask).objectNumber(for: 1),
+    ]
+    let remoteONos = try [
+      OcaONoMask(oNo: 0x4000_0010, mask: Self.remoteMask.mask).objectNumber(for: 2),
+      OcaONoMask(oNo: 0x4000_0020, mask: Self.remoteMask.mask).objectNumber(for: 2),
+    ]
+
+    #expect(
+      try await profile.remapReferenceONosToRemote(
+        localONos,
+        targetMatch: Self.referenceTargetMatch,
+        deviceIndex: 2
+      ) == remoteONos
+    )
+    #expect(
+      try await profile.remapReferenceONosToLocal(
+        remoteONos,
+        targetMatch: Self.referenceTargetMatch,
+        deviceIndex: 2
+      ) == localONos
+    )
   }
 }
 
@@ -874,6 +1023,34 @@ final class _LateRegisteredLevelSensor: SwiftOCADevice.OcaLevelSensor {
   }
 }
 
+@OcaConnection
+final class _ReferenceScalarProxyObject: SwiftOCA.OcaWorker {
+  override class var classID: OcaClassID { OcaClassID(
+    parent: SwiftOCA.OcaWorker.classID,
+    authority: PADLCompanyID,
+    2000
+  ) }
+
+  @OcaProperty(
+    propertyID: OcaPropertyID("4.1"),
+    getMethodID: OcaMethodID("4.1"),
+    setMethodID: OcaMethodID("4.2")
+  )
+  var target: OcaProperty<OcaONo>.PropertyValue
+}
+
+@OcaDevice
+final class _ReferenceScalarDeviceObject: SwiftOCADevice.OcaWorker {
+  override class var classID: OcaClassID { _ReferenceScalarProxyObject.classID }
+
+  @OcaDeviceProperty(
+    propertyID: OcaPropertyID("4.1"),
+    getMethodID: OcaMethodID("4.1"),
+    setMethodID: OcaMethodID("4.2")
+  )
+  var target: OcaONo = OcaInvalidONo
+}
+
 @Suite
 struct YAMLSchemaTests {
   static let _minimalYAML = """
@@ -1124,6 +1301,47 @@ struct EndToEndTests {
   static let remoteMissingMuteONo: OcaONo = 0x300
   static let localGainONo: OcaONo = 0x2000
   static let localMissingMuteONo: OcaONo = 0x3000
+  static let referenceDeviceIndex: OcaONo = 2
+  static let localReferenceGain1Mask = OcaONoMask(oNo: 0x0000_0010, mask: 0x0F00_0000)
+  static let localReferenceGain2Mask = OcaONoMask(oNo: 0x0000_0020, mask: 0x0F00_0000)
+  static let localReferenceGroupMask = OcaONoMask(oNo: 0x0000_0030, mask: 0x0F00_0000)
+  static let remoteReferenceGain1Mask = OcaONoMask(oNo: 0x4000_0010, mask: 0x0300_0000)
+  static let remoteReferenceGain2Mask = OcaONoMask(oNo: 0x4000_0020, mask: 0x0300_0000)
+  static let remoteReferenceGroupMask = OcaONoMask(oNo: 0x4000_0030, mask: 0x0300_0000)
+  static let localReferenceScalarMask = OcaONoMask(oNo: 0x0000_0040, mask: 0x0F00_0000)
+  static let remoteReferenceScalarMask = OcaONoMask(oNo: 0x4000_0040, mask: 0x0300_0000)
+
+  static var localReferenceGain1ONo: OcaONo {
+    get throws { try localReferenceGain1Mask.objectNumber(for: 1) }
+  }
+
+  static var localReferenceGain2ONo: OcaONo {
+    get throws { try localReferenceGain2Mask.objectNumber(for: 1) }
+  }
+
+  static var localReferenceGroupONo: OcaONo {
+    get throws { try localReferenceGroupMask.objectNumber(for: 1) }
+  }
+
+  static var remoteReferenceGain1ONo: OcaONo {
+    get throws { try remoteReferenceGain1Mask.objectNumber(for: referenceDeviceIndex) }
+  }
+
+  static var remoteReferenceGain2ONo: OcaONo {
+    get throws { try remoteReferenceGain2Mask.objectNumber(for: referenceDeviceIndex) }
+  }
+
+  static var remoteReferenceGroupONo: OcaONo {
+    get throws { try remoteReferenceGroupMask.objectNumber(for: referenceDeviceIndex) }
+  }
+
+  static var localReferenceScalarONo: OcaONo {
+    get throws { try localReferenceScalarMask.objectNumber(for: 1) }
+  }
+
+  static var remoteReferenceScalarONo: OcaONo {
+    get throws { try remoteReferenceScalarMask.objectNumber(for: referenceDeviceIndex) }
+  }
 
   private static func _randomModelGUID() -> OcaModelGUID {
     OcaModelGUID(
@@ -1228,6 +1446,114 @@ struct EndToEndTests {
       models: [modelGUID],
       profileSchemas: [profileSchema]
     )
+  }
+
+  static func _makeReferenceSchema(modelGUID: OcaModelGUID) -> OcaDeviceSchema {
+    let referenceTarget = OcaONoMask(oNo: 0x4000_0010, mask: 0x0300_0000)
+    let gain1 = OcaProfileObjectSchema(
+      role: "Gain 1",
+      type: SwiftOCADevice.OcaGain.self,
+      localObjectNumber: localReferenceGain1Mask,
+      remoteObjectNumber: remoteReferenceGain1Mask
+    )
+    let gain2 = OcaProfileObjectSchema(
+      role: "Gain 2",
+      type: SwiftOCADevice.OcaGain.self,
+      localObjectNumber: localReferenceGain2Mask,
+      remoteObjectNumber: remoteReferenceGain2Mask
+    )
+    let group = OcaProfileObjectSchema(
+      role: "Group",
+      type: SwiftOCADevice.OcaGroup<SwiftOCADevice.OcaGain>.self,
+      localObjectNumber: localReferenceGroupMask,
+      remoteObjectNumber: remoteReferenceGroupMask,
+      includeProperties: [OcaPropertyID("3.1")],
+      referenceProperties: [
+        OcaPropertyID("3.1"): OcaProfileReferencePropertySchema(targetMatch: referenceTarget),
+      ]
+    )
+    let scalar = OcaProfileObjectSchema(
+      role: "Scalar",
+      type: _ReferenceScalarDeviceObject.self,
+      localObjectNumber: localReferenceScalarMask,
+      remoteObjectNumber: remoteReferenceScalarMask,
+      referenceProperties: [
+        OcaPropertyID("4.1"): OcaProfileReferencePropertySchema(targetMatch: referenceTarget),
+      ]
+    )
+
+    return OcaDeviceSchema(
+      name: "E2EReferenceDevice",
+      models: [modelGUID],
+      profileSchemas: [OcaProfileSchema(name: "E2EReferences", blocks: [gain1, gain2, group, scalar])]
+    )
+  }
+
+  static func _makeReferenceRemoteDevice(
+    port: UInt16,
+    serialNumber: String,
+    modelGUID: OcaModelGUID
+  ) async throws -> (
+    device: OcaDevice,
+    gain1: SwiftOCADevice.OcaGain,
+    gain2: SwiftOCADevice.OcaGain,
+    group: SwiftOCADevice.OcaGroup<SwiftOCADevice.OcaGain>,
+    scalar: _ReferenceScalarDeviceObject,
+    endpointTask: Task<(), Error>
+  ) {
+    let device = OcaDevice()
+    try await device.initializeDefaultObjects()
+    let deviceManager = await device.deviceManager!
+    await _setDeviceManagerProperties(
+      deviceManager,
+      name: "E2E Reference Remote Device",
+      serialNumber: serialNumber,
+      modelGUID: modelGUID
+    )
+
+    let gain1 = try await SwiftOCADevice.OcaGain(
+      objectNumber: try remoteReferenceGain1ONo,
+      role: "Gain 1",
+      deviceDelegate: device
+    )
+    let gain2 = try await SwiftOCADevice.OcaGain(
+      objectNumber: try remoteReferenceGain2ONo,
+      role: "Gain 2",
+      deviceDelegate: device
+    )
+    let group = try await SwiftOCADevice.OcaGroup<SwiftOCADevice.OcaGain>(
+      objectNumber: try remoteReferenceGroupONo,
+      role: "Group",
+      deviceDelegate: device
+    )
+    let scalar = try await _ReferenceScalarDeviceObject(
+      objectNumber: try remoteReferenceScalarONo,
+      role: "Scalar",
+      deviceDelegate: device
+    )
+
+    let controlNetwork = try await SwiftOCADevice.OcaControlNetwork(deviceDelegate: device)
+    await _setControlNetworkRunning(controlNetwork)
+
+    var listenAddress = sockaddr_in()
+    listenAddress.sin_family = sa_family_t(AF_INET)
+    listenAddress.sin_addr.s_addr = UInt32(INADDR_LOOPBACK).bigEndian
+    listenAddress.sin_port = port.bigEndian
+    #if canImport(Darwin) || os(FreeBSD) || os(OpenBSD)
+    listenAddress.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+    #endif
+
+    let endpoint = try await Ocp1DeviceEndpoint(
+      address: listenAddress.socketAddressData,
+      device: device
+    )
+
+    let endpointTask = Task {
+      try await endpoint.run()
+    }
+    try await Task.sleep(for: .milliseconds(500))
+
+    return (device, gain1, gain2, group, scalar, endpointTask)
   }
 
   private static func _makeCoordinator(
@@ -1424,5 +1750,117 @@ struct EndToEndTests {
     await { @OcaDevice in localGain.gain.value = testValue }()
     try await Task.sleep(for: .seconds(2))
     #expect(await remoteGain.gain.value == testValue)
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func referencePropertiesRemapOnBindAndLiveSync() async throws {
+    let port: UInt16 = 12348
+    let serialNumber = "E2EReference-\(UUID().uuidString)"
+    let modelGUID = Self._randomModelGUID()
+    try? await OcaDeviceClassRegistry.shared.register(_ReferenceScalarDeviceObject.self)
+    try? await OcaClassRegistry.shared.register(_ReferenceScalarProxyObject.self)
+    let (remoteDevice, remoteGain1, remoteGain2, remoteGroup, remoteScalar, endpointTask) =
+      try await Self._makeReferenceRemoteDevice(
+        port: port,
+        serialNumber: serialNumber,
+        modelGUID: modelGUID
+      )
+    defer { endpointTask.cancel() }
+
+    let localDevice = OcaDevice()
+    try await localDevice.initializeDefaultObjects()
+    let connectionOptions = Ocp1ConnectionOptions(
+      flags: [.automaticReconnect, .refreshDeviceTreeOnConnection]
+    )
+    let broker = await OcaConnectionBroker(
+      connectionOptions: connectionOptions,
+      serviceTypes: [],
+      deviceModels: nil
+    )
+    let coordinator = try await OcaCoordinator(
+      connectionBroker: broker,
+      deviceSchema: Self._makeReferenceSchema(modelGUID: modelGUID),
+      deviceDelegate: localDevice
+    )
+    let profileONo = try await coordinator.addProfile(schema: "E2EReferences")
+    let profile = try await coordinator._findProfile(oNo: profileONo)
+
+    let localGain1: SwiftOCADevice.OcaGain = await localDevice.resolve(
+      objectNumber: try Self.localReferenceGain1ONo
+    )!
+    let localGain2: SwiftOCADevice.OcaGain = await localDevice.resolve(
+      objectNumber: try Self.localReferenceGain2ONo
+    )!
+    let localGroup: SwiftOCADevice.OcaGroup<SwiftOCADevice.OcaGain> = await localDevice.resolve(
+      objectNumber: try Self.localReferenceGroupONo
+    )!
+    let localScalar: _ReferenceScalarDeviceObject = await localDevice.resolve(
+      objectNumber: try Self.localReferenceScalarONo
+    )!
+
+    try await localGroup.set(members: [localGain1, localGain2])
+    await { @OcaDevice in localScalar.target = localGain2.objectNumber }()
+
+    let deviceIdentifier = OcaConnectionBroker.DeviceIdentifier(
+      serviceType: .tcp,
+      modelGUID: modelGUID,
+      serialNumber: serialNumber,
+      name: "E2E Reference Remote Device"
+    )
+    try await { @OcaDevice in
+      try coordinator.bindProfile(
+        profile,
+        to: deviceIdentifier,
+        deviceIndex: Self.referenceDeviceIndex
+      )
+    }()
+
+    var remoteAddress = sockaddr_in()
+    remoteAddress.sin_family = sa_family_t(AF_INET)
+    remoteAddress.sin_addr.s_addr = UInt32(INADDR_LOOPBACK).bigEndian
+    remoteAddress.sin_port = port.bigEndian
+    #if canImport(Darwin) || os(FreeBSD) || os(OpenBSD)
+    remoteAddress.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+    #endif
+    let connection = try await Ocp1TCPConnection(
+      deviceAddress: remoteAddress.socketAddressData,
+      options: connectionOptions
+    )
+    try await connection.connect()
+    defer { Task { try? await connection.disconnect() } }
+
+    await broker.register(device: deviceIdentifier, connection: connection)
+    let brokerEventTask = Task { [weak coordinator] in
+      guard let coordinator else { return }
+      for await event in await broker.events {
+        await coordinator.handleConnectionBrokerEvent(event)
+      }
+    }
+    defer { brokerEventTask.cancel() }
+
+    for _ in 0..<20 {
+      if await profile.remoteObjectCount(for: deviceIdentifier) == 4 { break }
+      try await Task.sleep(for: .milliseconds(250))
+    }
+
+    #expect(await profile.remoteObjectCount(for: deviceIdentifier) == 4)
+    #expect(await remoteGroup.members.map(\.objectNumber) == [remoteGain1.objectNumber, remoteGain2.objectNumber])
+    #expect(await remoteScalar.target == remoteGain2.objectNumber)
+
+    try await localGroup.set(members: [localGain1])
+    await { @OcaDevice in localScalar.target = localGain1.objectNumber }()
+    try await Task.sleep(for: .seconds(2))
+
+    #expect(await remoteGroup.members.map(\.objectNumber) == [remoteGain1.objectNumber])
+    #expect(await remoteScalar.target == remoteGain1.objectNumber)
+
+    try await remoteGroup.set(members: [remoteGain2])
+    await { @OcaDevice in remoteScalar.target = remoteGain2.objectNumber }()
+    try await Task.sleep(for: .seconds(2))
+
+    #expect(await localGroup.members.map(\.objectNumber) == [localGain2.objectNumber])
+    #expect(await localScalar.target == localGain2.objectNumber)
+
+    _ = remoteDevice
   }
 }

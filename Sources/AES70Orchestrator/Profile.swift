@@ -257,6 +257,108 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     return try oNoMask.objectNumber(for: profileIndex)
   }
 
+  private func _referenceMaps(
+    deviceIndex: OcaONo,
+    targetMatch: OcaONoMask
+  ) throws -> (localToRemote: [OcaONo: OcaONo], remoteToLocal: [OcaONo: OcaONo]) {
+    _ = targetMatch
+    let schema = try profileSchema
+    var localToRemote = [OcaONo: OcaONo]()
+    var remoteToLocal = [OcaONo: OcaONo]()
+
+    for block in schema.blocks {
+      try block.applyRecursive { objectSchema, _, _ in
+        guard let localObjectNumber = objectSchema.localObjectNumber,
+              let localONo = try objectNumber(for: localObjectNumber)
+        else {
+          return
+        }
+
+        let remoteONo = try objectSchema.remoteObjectNumber.objectNumber(for: deviceIndex)
+        localToRemote[localONo] = remoteONo
+        remoteToLocal[remoteONo] = localONo
+      }
+    }
+
+    return (localToRemote, remoteToLocal)
+  }
+
+  func remapReferenceONoToRemote(
+    _ oNo: OcaONo,
+    targetMatch: OcaONoMask,
+    deviceIndex: OcaONo
+  ) throws -> OcaONo {
+    guard oNo != OcaInvalidONo else { return oNo }
+    let maps = try _referenceMaps(deviceIndex: deviceIndex, targetMatch: targetMatch)
+    return maps.localToRemote[oNo] ?? oNo
+  }
+
+  func remapReferenceONoToLocal(
+    _ oNo: OcaONo,
+    targetMatch: OcaONoMask,
+    deviceIndex: OcaONo
+  ) throws -> OcaONo {
+    guard oNo != OcaInvalidONo else { return oNo }
+    let maps = try _referenceMaps(deviceIndex: deviceIndex, targetMatch: targetMatch)
+    return maps.remoteToLocal[oNo] ?? oNo
+  }
+
+  func remapReferenceONosToRemote(
+    _ onos: [OcaONo],
+    targetMatch: OcaONoMask,
+    deviceIndex: OcaONo
+  ) throws -> [OcaONo] {
+    try onos.map { try remapReferenceONoToRemote($0, targetMatch: targetMatch, deviceIndex: deviceIndex) }
+  }
+
+  func remapReferenceONosToLocal(
+    _ onos: [OcaONo],
+    targetMatch: OcaONoMask,
+    deviceIndex: OcaONo
+  ) throws -> [OcaONo] {
+    try onos.map { try remapReferenceONoToLocal($0, targetMatch: targetMatch, deviceIndex: deviceIndex) }
+  }
+
+  func remapReferencePropertyDataToRemote(
+    _ data: Data,
+    targetMatch: OcaONoMask,
+    deviceIndex: OcaONo
+  ) throws -> Data {
+    if let onos = try? Ocp1Decoder().decode([OcaONo].self, from: data) {
+      return try Ocp1Encoder().encode(
+        remapReferenceONosToRemote(onos, targetMatch: targetMatch, deviceIndex: deviceIndex)
+      )
+    }
+
+    if let oNo = try? Ocp1Decoder().decode(OcaONo.self, from: data) {
+      return try Ocp1Encoder().encode(
+        remapReferenceONoToRemote(oNo, targetMatch: targetMatch, deviceIndex: deviceIndex)
+      )
+    }
+
+    return data
+  }
+
+  func remapReferencePropertyDataToLocal(
+    _ data: Data,
+    targetMatch: OcaONoMask,
+    deviceIndex: OcaONo
+  ) throws -> Data {
+    if let onos = try? Ocp1Decoder().decode([OcaONo].self, from: data) {
+      return try Ocp1Encoder().encode(
+        remapReferenceONosToLocal(onos, targetMatch: targetMatch, deviceIndex: deviceIndex)
+      )
+    }
+
+    if let oNo = try? Ocp1Decoder().decode(OcaONo.self, from: data) {
+      return try Ocp1Encoder().encode(
+        remapReferenceONoToLocal(oNo, targetMatch: targetMatch, deviceIndex: deviceIndex)
+      )
+    }
+
+    return data
+  }
+
   private func _createLocalObjects(
     proxyBlock: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>
   ) async throws {
@@ -292,7 +394,8 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
           profile: self,
           lockRemote: objectSchema.lockRemote,
           includeProperties: objectSchema.includeProperties,
-          excludeProperties: objectSchema.excludeProperties
+          excludeProperties: objectSchema.excludeProperties,
+          referenceProperties: objectSchema.referenceProperties
         ), for: object.objectNumber)
       }
     }

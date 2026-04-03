@@ -74,6 +74,53 @@ extension OcaDeviceSchema {
     return string
   }
 
+  private static func _parseReferencePropertySchema(
+    propertyID: OcaPropertyID,
+    node: Node
+  ) throws -> OcaProfileReferencePropertySchema {
+    if let string = node.string {
+      return OcaProfileReferencePropertySchema(targetMatch: try OcaONoMask(string))
+    }
+
+    guard let mapping = node.mapping else {
+      throw OcaCoordinatorError.schemaParseError(
+        "reference property '\(propertyID)' must be a string or mapping"
+      )
+    }
+    guard let targetMatchString = Self._node(in: mapping, keys: ["target-match", "targetMatch"])?
+      .string
+    else {
+      throw OcaCoordinatorError.schemaParseError(
+        "reference property '\(propertyID)' missing 'target-match'"
+      )
+    }
+
+    return OcaProfileReferencePropertySchema(targetMatch: try OcaONoMask(targetMatchString))
+  }
+
+  private static func _parseReferenceProperties(
+    _ node: Node?
+  ) throws -> [OcaPropertyID: OcaProfileReferencePropertySchema] {
+    guard let mapping = node?.mapping else { return [:] }
+
+    var referenceProperties = [OcaPropertyID: OcaProfileReferencePropertySchema]()
+    for (propertyNode, valueNode) in mapping {
+      guard let propertyString = propertyNode.string else {
+        throw OcaCoordinatorError.schemaParseError(
+          "reference property identifier must be a string"
+        )
+      }
+
+      let propertyID = try OcaPropertyID(unsafeString: propertyString)
+      referenceProperties[propertyID] = try _parseReferencePropertySchema(
+        propertyID: propertyID,
+        node: valueNode
+      )
+    }
+
+    return referenceProperties
+  }
+
   @OcaDevice
   private static func _parseProfileSchema(_ node: Node) throws -> OcaProfileSchema {
     guard let mapping = node.mapping, mapping.count == 1,
@@ -172,6 +219,10 @@ extension OcaDeviceSchema {
       excludeProperties = Set(seq.compactMap { $0.string.map { OcaPropertyID($0) } })
     }
 
+    let referenceProperties = try _parseReferenceProperties(
+      Self._node(in: props, keys: ["reference-props", "referenceProperties"])
+    )
+
     return OcaProfileObjectSchema(
       role: role,
       declaredClassID: declaredClassID,
@@ -181,6 +232,7 @@ extension OcaDeviceSchema {
       lockRemote: lockRemote,
       includeProperties: includeProperties,
       excludeProperties: excludeProperties,
+      referenceProperties: referenceProperties,
       actionObjectSchema: actionObjects
     )
   }

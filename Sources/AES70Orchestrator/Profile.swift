@@ -374,18 +374,51 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     schema: OcaProfileObjectSchema,
     _ body: (any OcaObjectBindingRepresentable, SwiftOCA.OcaRoot) async throws -> ()
   ) async throws {
-    try await schema.applyRecursive { objectSchema, _, _ in
-      let remoteONo = try objectSchema.remoteObjectNumber.objectNumber(for: deviceIndex)
-      let remoteObject: SwiftOCA.OcaRoot = try await connection.resolve(
-        objectOfUnknownClass: remoteONo
+    try await _forEachBinding(
+      deviceIdentifier: deviceIdentifier,
+      deviceIndex: deviceIndex,
+      connection: connection,
+      schema: schema,
+      rolePath: [schema.role],
+      body,
+    )
+  }
+
+  private func _forEachBinding(
+    deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier,
+    deviceIndex: OcaONo,
+    connection: Ocp1Connection,
+    schema: OcaProfileObjectSchema,
+    rolePath: [String],
+    _ body: (any OcaObjectBindingRepresentable, SwiftOCA.OcaRoot) async throws -> ()
+  ) async throws {
+    let remoteONo = try schema.remoteObjectNumber.objectNumber(for: deviceIndex)
+    let remoteObject: SwiftOCA.OcaRoot
+
+    do {
+      remoteObject = try await connection.resolve(objectOfUnknownClass: remoteONo)
+    } catch let error as Ocp1Error where error == .status(.badONo) {
+      coordinator?.logger.debug(
+        "Skipping missing remote object for \(self) at \(rolePath.joined(separator: "/")) on \(deviceIdentifier) (oNo=\(remoteONo))"
       )
-      guard let localONo = try objectNumber(for: objectSchema.localObjectNumber) else {
-        return
-      }
-      guard let binding = objectBinding(for: localONo) else {
-        return
-      }
+      return
+    }
+
+    if let localONo = try objectNumber(for: schema.localObjectNumber),
+       let binding = objectBinding(for: localONo)
+    {
       try await body(binding, remoteObject)
+    }
+
+    for child in schema.actionObjectSchema {
+      try await _forEachBinding(
+        deviceIdentifier: deviceIdentifier,
+        deviceIndex: deviceIndex,
+        connection: connection,
+        schema: child,
+        rolePath: rolePath + [child.role],
+        body,
+      )
     }
   }
 

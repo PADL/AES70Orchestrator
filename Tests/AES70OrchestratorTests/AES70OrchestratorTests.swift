@@ -1121,7 +1121,9 @@ private func _setControlNetworkRunning(_ controlNetwork: SwiftOCADevice.OcaContr
 @Suite(.serialized)
 struct EndToEndTests {
   static let remoteGainONo: OcaONo = 0x200
+  static let remoteMissingMuteONo: OcaONo = 0x300
   static let localGainONo: OcaONo = 0x2000
+  static let localMissingMuteONo: OcaONo = 0x3000
 
   private static func _randomModelGUID() -> OcaModelGUID {
     OcaModelGUID(
@@ -1204,10 +1206,35 @@ struct EndToEndTests {
     )
   }
 
+  static func _makeSchemaWithMissingRemoteObject(modelGUID: OcaModelGUID) -> OcaDeviceSchema {
+    let gainSchema = OcaProfileObjectSchema(
+      role: "Gain",
+      type: SwiftOCADevice.OcaGain.self,
+      localObjectNumber: OcaONoMask(oNo: localGainONo, mask: 0),
+      remoteObjectNumber: OcaONoMask(oNo: remoteGainONo, mask: 0)
+    )
+    let missingMuteSchema = OcaProfileObjectSchema(
+      role: "Mute",
+      type: SwiftOCADevice.OcaMute.self,
+      localObjectNumber: OcaONoMask(oNo: localMissingMuteONo, mask: 0),
+      remoteObjectNumber: OcaONoMask(oNo: remoteMissingMuteONo, mask: 0)
+    )
+    let profileSchema = OcaProfileSchema(
+      name: "E2EGain",
+      blocks: [gainSchema, missingMuteSchema]
+    )
+    return OcaDeviceSchema(
+      name: "E2ETestDevice",
+      models: [modelGUID],
+      profileSchemas: [profileSchema]
+    )
+  }
+
   private static func _makeCoordinator(
     port: UInt16,
     modelGUID: OcaModelGUID,
-    serialNumber: String
+    serialNumber: String,
+    schema: OcaDeviceSchema? = nil
   ) async throws -> (
     coordinator: OcaCoordinator,
     localDevice: OcaDevice,
@@ -1224,7 +1251,7 @@ struct EndToEndTests {
       serviceTypes: [],
       deviceModels: nil
     )
-    let schema = _makeSchema(modelGUID: modelGUID)
+    let schema = schema ?? _makeSchema(modelGUID: modelGUID)
     let coordinator = try await OcaCoordinator(
       connectionBroker: broker,
       deviceSchema: schema,
@@ -1357,5 +1384,45 @@ struct EndToEndTests {
     #expect(localValue == testValue, "local proxy gain should have been updated")
 
     _ = remoteDevice
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func missingRemoteObjectDoesNotAbortActivation() async throws {
+    let port: UInt16 = 12347
+    let serialNumber = "E2ETest-Missing-\(UUID().uuidString)"
+    let modelGUID = Self._randomModelGUID()
+    let (_remoteDevice, remoteGain, endpointTask) = try await Self._makeRemoteDevice(
+      port: port,
+      serialNumber: serialNumber,
+      modelGUID: modelGUID
+    )
+    defer { endpointTask.cancel() }
+
+    let schema = Self._makeSchemaWithMissingRemoteObject(modelGUID: modelGUID)
+    let (coordinator, localDevice, deviceIdentifier) = try await Self._makeCoordinator(
+      port: port,
+      modelGUID: modelGUID,
+      serialNumber: serialNumber,
+      schema: schema
+    )
+    let zeroUUID = UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+    let profile = try await coordinator.findProfile(uuid: zeroUUID)
+
+    for _ in 0..<20 {
+      let count = await profile.remoteObjectCount(for: deviceIdentifier)
+      if count == 1 { break }
+      try await Task.sleep(for: .milliseconds(250))
+    }
+
+    #expect(await profile.remoteObjectCount(for: deviceIdentifier) == 1)
+
+    let localGain: SwiftOCADevice.OcaGain = await localDevice.resolve(
+      objectNumber: Self.localGainONo
+    )!
+
+    let testValue: OcaDB = -6.0
+    await { @OcaDevice in localGain.gain.value = testValue }()
+    try await Task.sleep(for: .seconds(2))
+    #expect(await remoteGain.gain.value == testValue)
   }
 }

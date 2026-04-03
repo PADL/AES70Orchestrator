@@ -481,15 +481,11 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
           toMasked: toMasked
         )
       }
-    }
-
-    if let onos = value as? [OcaONo] {
+    } else if let onos = value as? [OcaONo] {
       return onos.map {
         _remapStoredONo($0, oNoMap: oNoMap, proxyBlockONo: proxyBlockONo, toMasked: toMasked)
       }
-    }
-
-    if let numbers = value as? [NSNumber] {
+    } else if let numbers = value as? [NSNumber] {
       return numbers.map {
         _remapStoredONo(
           OcaONo(truncating: $0),
@@ -498,22 +494,18 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
           toMasked: toMasked
         )
       }
-    }
-
-    if let oNo = value as? OcaONo {
+    } else if let oNo = value as? OcaONo {
       return _remapStoredONo(oNo, oNoMap: oNoMap, proxyBlockONo: proxyBlockONo, toMasked: toMasked)
-    }
-
-    if let number = value as? NSNumber {
+    } else if let number = value as? NSNumber {
       return _remapStoredONo(
         OcaONo(truncating: number),
         oNoMap: oNoMap,
         proxyBlockONo: proxyBlockONo,
         toMasked: toMasked
       )
+    } else {
+      return value
     }
-
-    return value
   }
 
   private func _remapONos(

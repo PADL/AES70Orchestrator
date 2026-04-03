@@ -509,7 +509,7 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     do {
       remoteObject = try await connection.resolve(objectOfUnknownClass: remoteONo)
     } catch let error as Ocp1Error where error == .status(.badONo) {
-      coordinator?.logger.debug(
+      coordinator?.logger.trace(
         "Skipping missing remote object for \(self) at \(rolePath.joined(separator: "/")) on \(deviceIdentifier) (oNo=\(remoteONo))"
       )
       return

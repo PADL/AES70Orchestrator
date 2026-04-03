@@ -297,7 +297,8 @@ struct YAMLPropertyFilterTests {
       profiles:
         - TestProfile:
           - Gain:
-              class-id: 1.1.1.5
+              class-id: \(SwiftOCADevice.OcaGain.classID)
+              class-version: \(SwiftOCADevice.OcaGain.classVersion)
               match: 0x00000200/0x00000000
               include-props:
                 - "4.1"
@@ -317,7 +318,8 @@ struct YAMLPropertyFilterTests {
       profiles:
         - TestProfile:
           - Gain:
-              class-id: 1.1.1.5
+              class-id: \(SwiftOCADevice.OcaGain.classID)
+              class-version: \(SwiftOCADevice.OcaGain.classVersion)
               match: 0x00000200/0x00000000
               exclude-props:
                 - "1.6"
@@ -336,7 +338,8 @@ struct YAMLPropertyFilterTests {
       profiles:
         - TestProfile:
           - Gain:
-              class-id: 1.1.1.5
+              class-id: \(SwiftOCADevice.OcaGain.classID)
+              class-version: \(SwiftOCADevice.OcaGain.classVersion)
               match: 0x00000200/0x00000000
               include-props:
                 - "4.1"
@@ -360,7 +363,8 @@ struct YAMLPropertyFilterTests {
       profiles:
         - TestProfile:
           - Gain:
-              class-id: 1.1.1.5
+              class-id: \(SwiftOCADevice.OcaGain.classID)
+              class-version: \(SwiftOCADevice.OcaGain.classVersion)
               match: 0x00000200/0x00000000
     """
     let schema = try await _parseYAML(yaml)
@@ -377,7 +381,8 @@ struct YAMLPropertyFilterTests {
       profiles:
         - TestProfile:
           - Group:
-              class-id: 1.2.22
+              class-id: \(SwiftOCADevice.OcaGroup<SwiftOCADevice.OcaRoot>.classID)
+              class-version: \(SwiftOCADevice.OcaGroup<SwiftOCADevice.OcaRoot>.classVersion)
               match: 0x40000030/0x03000000
               reference-props:
                 "3.1":
@@ -1059,7 +1064,8 @@ struct YAMLSchemaTests {
     profiles:
       - SimpleGain:
         - Gain:
-            classID: 1.1.1.5
+            classID: \(SwiftOCADevice.OcaGain.classID)
+            classVersion: \(SwiftOCADevice.OcaGain.classVersion)
             match: 0x00000200/0x0000000F
             objectNumber: 0x00002000/0x000000F0
   """
@@ -1070,16 +1076,19 @@ struct YAMLSchemaTests {
     profiles:
       - Channel:
         - ChannelBlock:
-            classID: 1.1.3
+            classID: \(SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>.classID)
+            classVersion: \(SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>.classVersion)
             match: 0x00000100/0x0000000F
             objectNumber: 0x00001000/0x000000F0
             actionObjects:
               - Mute:
-                  classID: 1.1.1.2
+                  classID: \(SwiftOCADevice.OcaMute.classID)
+                  classVersion: \(SwiftOCADevice.OcaMute.classVersion)
                   match: 0x00000300/0x0000000F
                   objectNumber: 0x00003000/0x000000F0
               - Gain:
-                  classID: 1.1.1.5
+                  classID: \(SwiftOCADevice.OcaGain.classID)
+                  classVersion: \(SwiftOCADevice.OcaGain.classVersion)
                   match: 0x00000200/0x0000000F
                   objectNumber: 0x00002000/0x000000F0
   """
@@ -1093,7 +1102,8 @@ struct YAMLSchemaTests {
             match: 0x00000100/0x0000000F
             actionObjects:
               - Gain:
-                  classID: 1.1.1.5
+                  classID: \(SwiftOCADevice.OcaGain.classID)
+                  classVersion: \(SwiftOCADevice.OcaGain.classVersion)
                   match: 0x00000200/0x0000000F
   """
 
@@ -1104,7 +1114,8 @@ struct YAMLSchemaTests {
     profiles:
       - Simple:
         - Gain:
-            classID: 1.1.1.5
+            classID: \(SwiftOCADevice.OcaGain.classID)
+            classVersion: \(SwiftOCADevice.OcaGain.classVersion)
             match: 0x00000200/0x0000000F
   """
 
@@ -1183,7 +1194,8 @@ struct YAMLSchemaTests {
       profiles:
         - P:
           - Obj:
-              classID: 1.1.1.5
+              classID: \(SwiftOCADevice.OcaGain.classID)
+              classVersion: \(SwiftOCADevice.OcaGain.classVersion)
     """
     await #expect(throws: OcaCoordinatorError.self) {
       try await OcaDeviceSchema(yaml: yaml)
@@ -1197,7 +1209,8 @@ struct YAMLSchemaTests {
       - BlockProfile:
           blocks:
             - Gain:
-                classID: 1.1.1.5
+                classID: \(SwiftOCADevice.OcaGain.classID)
+                classVersion: \(SwiftOCADevice.OcaGain.classVersion)
                 match: 0x00000200/0x0000000F
                 objectNumber: 0x00002000/0x000000F0
   """
@@ -1219,7 +1232,8 @@ struct YAMLSchemaTests {
         - LockProfile:
             blocks:
               - Gain:
-                  classID: 1.1.1.5
+                  classID: \(SwiftOCADevice.OcaGain.classID)
+                  classVersion: \(SwiftOCADevice.OcaGain.classVersion)
                   match: 0x00000200/0x0000000F
                   lockRemote: true
     """
@@ -1242,6 +1256,7 @@ struct YAMLSchemaTests {
         - ProprietaryProfile:
           - Sensor:
               classID: \(_LateRegisteredLevelSensor.classID)
+              classVersion: \(_LateRegisteredLevelSensor.classVersion)
               match: 0x00000200/0x00000000
               objectNumber: 0x00002000/0x00000000
     """
@@ -1250,6 +1265,7 @@ struct YAMLSchemaTests {
     let sensorSchema = schema.profileSchemas[0].blocks[0]
 
     #expect(sensorSchema.declaredClassID == _LateRegisteredLevelSensor.classID)
+    #expect(sensorSchema.declaredClassVersion == _LateRegisteredLevelSensor.classVersion)
     #expect(sensorSchema.type == SwiftOCADevice.OcaLevelSensor.self)
 
     try? await OcaDeviceClassRegistry.shared.register(_LateRegisteredLevelSensor.self)
@@ -1258,6 +1274,23 @@ struct YAMLSchemaTests {
     let sensorClassID = await sensor.objectIdentification.classIdentification.classID
     #expect(type(of: sensor) == _LateRegisteredLevelSensor.self)
     #expect(sensorClassID == _LateRegisteredLevelSensor.classID)
+  }
+
+  @Test
+  func parseClassIDWithoutClassVersionThrows() async {
+    let yaml = """
+    device:
+      name: BadVersionedSchema
+      profiles:
+        - P:
+          - Gain:
+              classID: \(SwiftOCADevice.OcaGain.classID)
+              match: 0x00000200/0x00000000
+    """
+
+    await #expect(throws: OcaCoordinatorError.self) {
+      try await OcaDeviceSchema(yaml: yaml)
+    }
   }
 }
 

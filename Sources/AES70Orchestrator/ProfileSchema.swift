@@ -94,6 +94,15 @@ public struct OcaProfileObjectSchema: Sendable, CustomStringConvertible {
 
   // the class ID declared in the schema, if present
   public let declaredClassID: OcaClassID?
+  public let declaredClassVersion: OcaClassVersionNumber?
+
+  public var declaredClassIdentification: OcaClassIdentification? {
+    guard let declaredClassID else { return nil }
+    return OcaClassIdentification(
+      classID: declaredClassID,
+      classVersion: declaredClassVersion ?? SwiftOCADevice.OcaRoot.classVersion
+    )
+  }
 
   // the OCA class ID for the profile entry
   public let type: SwiftOCADevice.OcaRoot.Type
@@ -163,6 +172,7 @@ public struct OcaProfileObjectSchema: Sendable, CustomStringConvertible {
   public init(
     role: String,
     declaredClassID: OcaClassID? = nil,
+    declaredClassVersion: OcaClassVersionNumber? = nil,
     type: SwiftOCADevice.OcaRoot.Type,
     localObjectNumber: OcaONoMask? = nil,
     remoteObjectNumber: OcaONoMask,
@@ -174,6 +184,7 @@ public struct OcaProfileObjectSchema: Sendable, CustomStringConvertible {
   ) {
     self.role = role
     self.declaredClassID = declaredClassID
+    self.declaredClassVersion = declaredClassVersion
     self.type = type
     self.localObjectNumber = localObjectNumber
     self.remoteObjectNumber = remoteObjectNumber
@@ -189,8 +200,10 @@ public struct OcaProfileObjectSchema: Sendable, CustomStringConvertible {
     deviceDelegate: OcaDevice?
   ) async throws -> SwiftOCADevice.OcaRoot {
     let resolvedType =
-      if let declaredClassID {
-        try await OcaDeviceClassRegistry.shared.match(classID: declaredClassID)
+      if let declaredClassIdentification {
+        try await OcaDeviceClassRegistry.shared.match(
+          classIdentification: declaredClassIdentification
+        )
       } else {
         type
       }

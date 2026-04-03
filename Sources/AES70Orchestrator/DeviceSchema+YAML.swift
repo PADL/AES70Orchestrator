@@ -183,9 +183,24 @@ extension OcaDeviceSchema {
     let declaredClassID = Self._node(in: props, keys: ["class-id", "classID"])?
       .string
       .map { OcaClassID($0) }
+    let declaredClassVersion = Self._node(in: props, keys: ["class-version", "classVersion"])?
+      .int
+      .map(OcaClassVersionNumber.init)
+
+    if declaredClassID != nil, declaredClassVersion == nil {
+      throw OcaCoordinatorError.schemaParseError(
+        "object '\(role)' declares class-id but is missing class-version"
+      )
+    }
+
     let type: SwiftOCADevice.OcaRoot.Type
-    if let classID = declaredClassID {
-      type = try OcaDeviceClassRegistry.shared.match(classID: classID)
+    if let classID = declaredClassID, let classVersion = declaredClassVersion {
+      type = try OcaDeviceClassRegistry.shared.match(
+        classIdentification: OcaClassIdentification(
+          classID: classID,
+          classVersion: classVersion
+        )
+      )
     } else if !actionObjects.isEmpty {
       type = SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>.self
     } else {
@@ -226,6 +241,7 @@ extension OcaDeviceSchema {
     return OcaProfileObjectSchema(
       role: role,
       declaredClassID: declaredClassID,
+      declaredClassVersion: declaredClassVersion,
       type: type,
       localObjectNumber: localObjectNumber,
       remoteObjectNumber: remoteObjectNumber,

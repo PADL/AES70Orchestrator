@@ -242,15 +242,15 @@ public final class OcaObjectBinding<
       let remappedEventData = try _remapEventDataForRemote(eventData, deviceIdentifier: remoteDevice)
       if referenceProperties[propertyID] != nil || propertyID == OcaPropertyID("3.1") {
         if let onos = try? Ocp1Decoder().decode([OcaONo].self, from: remappedEventData.propertyValue) {
-          profile?.coordinator?.logger.trace(
+          profile?.coordinator?.logger.debug(
             "bind copy: local \(localObject.objectNumber) -> remote \(remoteObject.objectNumber) property \(propertyID) remoteONos=\(onos)"
           )
         } else if let oNo = try? Ocp1Decoder().decode(OcaONo.self, from: remappedEventData.propertyValue) {
-          profile?.coordinator?.logger.trace(
+          profile?.coordinator?.logger.debug(
             "bind copy: local \(localObject.objectNumber) -> remote \(remoteObject.objectNumber) property \(propertyID) remoteONo=\(oNo)"
           )
         } else {
-          profile?.coordinator?.logger.trace(
+          profile?.coordinator?.logger.debug(
             "bind copy: local \(localObject.objectNumber) -> remote \(remoteObject.objectNumber) property \(propertyID) bytes=\(remappedEventData.propertyValue.count)"
           )
         }
@@ -359,7 +359,7 @@ public final class OcaObjectBinding<
       throw Ocp1Error.status(.parameterError)
     }
     remoteObjects[remoteDevice] = remoteObject
-    profile?.coordinator?.logger.trace(
+    profile?.coordinator?.logger.debug(
       "bind: local object \(localObject.objectNumber) bound to remote object \(remoteObject.objectNumber) on \(remoteDevice)"
     )
     try await _copyProperties(to: remoteObject, remoteDevice: remoteDevice)

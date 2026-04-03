@@ -143,7 +143,8 @@ public final class OcaObjectBinding<
       propertyValue: try profile.remapReferencePropertyDataToRemote(
         eventData.propertyValue,
         targetMatch: referenceProperty.targetMatch,
-        deviceIndex: deviceIndex
+        deviceIndex: deviceIndex,
+        deviceIdentifier: deviceIdentifier
       ),
       changeType: eventData.changeType
     )

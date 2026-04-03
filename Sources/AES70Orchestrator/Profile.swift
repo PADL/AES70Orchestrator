@@ -322,6 +322,45 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     try onos.map { try remapReferenceONoToRemote($0, targetMatch: targetMatch, deviceIndex: deviceIndex) }
   }
 
+  private func _remoteReferenceExists(
+    for localONo: OcaONo,
+    deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
+  ) -> Bool {
+    guard localONo != OcaInvalidONo else { return true }
+    guard let binding = objectBinding(for: localONo) else { return false }
+    return binding.hasRemoteObject(for: deviceIdentifier)
+  }
+
+  func remapReferencePropertyDataToRemote(
+    _ data: Data,
+    targetMatch: OcaONoMask,
+    deviceIndex: OcaONo,
+    deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
+  ) throws -> Data {
+    if let onos = try? Ocp1Decoder().decode([OcaONo].self, from: data) {
+      let filteredONos = onos.filter {
+        _remoteReferenceExists(for: $0, deviceIdentifier: deviceIdentifier)
+      }
+      return try Ocp1Encoder().encode(
+        remapReferenceONosToRemote(filteredONos, targetMatch: targetMatch, deviceIndex: deviceIndex)
+      )
+    }
+
+    if let oNo = try? Ocp1Decoder().decode(OcaONo.self, from: data) {
+      let resolvedONo =
+        _remoteReferenceExists(for: oNo, deviceIdentifier: deviceIdentifier)
+          ? try remapReferenceONoToRemote(oNo, targetMatch: targetMatch, deviceIndex: deviceIndex)
+          : OcaInvalidONo
+      return try Ocp1Encoder().encode(resolvedONo)
+    }
+
+    return try remapReferencePropertyDataToRemote(
+      data,
+      targetMatch: targetMatch,
+      deviceIndex: deviceIndex
+    )
+  }
+
   func remapReferenceONosToLocal(
     _ onos: [OcaONo],
     targetMatch: OcaONoMask,

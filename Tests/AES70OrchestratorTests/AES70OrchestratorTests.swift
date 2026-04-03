@@ -1902,6 +1902,67 @@ struct EndToEndTests {
     return (device, gain1, gain2, group, scalar, endpointTask)
   }
 
+  static func _makeReferenceRemoteDeviceMissingSecondGain(
+    port: UInt16,
+    serialNumber: String,
+    modelGUID: OcaModelGUID
+  ) async throws -> (
+    device: OcaDevice,
+    gain1: SwiftOCADevice.OcaGain,
+    group: SwiftOCADevice.OcaGroup<SwiftOCADevice.OcaGain>,
+    scalar: _ReferenceScalarDeviceObject,
+    endpointTask: Task<(), Error>
+  ) {
+    let device = OcaDevice()
+    try await device.initializeDefaultObjects()
+    let deviceManager = await device.deviceManager!
+    await _setDeviceManagerProperties(
+      deviceManager,
+      name: "E2E Reference Remote Device Missing Gain 2",
+      serialNumber: serialNumber,
+      modelGUID: modelGUID
+    )
+
+    let gain1 = try await SwiftOCADevice.OcaGain(
+      objectNumber: try remoteReferenceGain1ONo,
+      role: "Gain 1",
+      deviceDelegate: device
+    )
+    let group = try await SwiftOCADevice.OcaGroup<SwiftOCADevice.OcaGain>(
+      objectNumber: try remoteReferenceGroupONo,
+      role: "Group",
+      deviceDelegate: device
+    )
+    let scalar = try await _ReferenceScalarDeviceObject(
+      objectNumber: try remoteReferenceScalarONo,
+      role: "Scalar",
+      deviceDelegate: device
+    )
+
+    let controlNetwork = try await SwiftOCADevice.OcaControlNetwork(deviceDelegate: device)
+    await _setControlNetworkRunning(controlNetwork)
+
+    var listenAddress = sockaddr_in()
+    listenAddress.sin_family = sa_family_t(AF_INET)
+    listenAddress.sin_addr.s_addr = UInt32(INADDR_LOOPBACK).bigEndian
+    listenAddress.sin_port = port.bigEndian
+    #if canImport(Darwin) || os(FreeBSD) || os(OpenBSD)
+    listenAddress.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+    #endif
+
+    let endpoint = try await Ocp1DeviceEndpoint(
+      address: listenAddress.socketAddressData,
+      device: device
+    )
+
+    let endpointTask = Task {
+      try await endpoint.run()
+    }
+    try await Task.sleep(for: .milliseconds(500))
+
+    return (device, gain1, group, scalar, endpointTask)
+  }
+
   private static func _makeCoordinator(
     port: UInt16,
     modelGUID: OcaModelGUID,
@@ -2260,6 +2321,104 @@ struct EndToEndTests {
 
     #expect(await localGroup.members.map(\.objectNumber) == [localGain2.objectNumber])
     #expect(await localScalar.target == localGain2.objectNumber)
+
+    _ = remoteDevice
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func referencePropertyListsSkipMissingRemoteObjects() async throws {
+    let port: UInt16 = 12350
+    let serialNumber = "E2EReferenceMissing-\(UUID().uuidString)"
+    let modelGUID = Self._randomModelGUID()
+    try? await OcaDeviceClassRegistry.shared.register(_ReferenceScalarDeviceObject.self)
+    try? await OcaClassRegistry.shared.register(_ReferenceScalarProxyObject.self)
+    let (remoteDevice, remoteGain1, remoteGroup, remoteScalar, endpointTask) =
+      try await Self._makeReferenceRemoteDeviceMissingSecondGain(
+        port: port,
+        serialNumber: serialNumber,
+        modelGUID: modelGUID
+      )
+    defer { endpointTask.cancel() }
+
+    let localDevice = OcaDevice()
+    try await localDevice.initializeDefaultObjects()
+    let connectionOptions = Ocp1ConnectionOptions(
+      flags: [.automaticReconnect, .refreshDeviceTreeOnConnection]
+    )
+    let broker = await OcaConnectionBroker(
+      connectionOptions: connectionOptions,
+      serviceTypes: [],
+      deviceModels: nil
+    )
+    let coordinator = try await OcaCoordinator(
+      connectionBroker: broker,
+      deviceSchema: Self._makeReferenceSchema(modelGUID: modelGUID),
+      deviceDelegate: localDevice
+    )
+    let profileONo = try await coordinator.addProfile(schema: "E2EReferences")
+    let profile = try await coordinator._findProfile(oNo: profileONo)
+
+    let localGain1: SwiftOCADevice.OcaGain = await localDevice.resolve(
+      objectNumber: try Self.localReferenceGain1ONo
+    )!
+    let localGain2: SwiftOCADevice.OcaGain = await localDevice.resolve(
+      objectNumber: try Self.localReferenceGain2ONo
+    )!
+    let localGroup: SwiftOCADevice.OcaGroup<SwiftOCADevice.OcaGain> = await localDevice.resolve(
+      objectNumber: try Self.localReferenceGroupONo
+    )!
+    let localScalar: _ReferenceScalarDeviceObject = await localDevice.resolve(
+      objectNumber: try Self.localReferenceScalarONo
+    )!
+
+    try await localGroup.set(members: [localGain1, localGain2])
+    await { @OcaDevice in localScalar.target = localGain2.objectNumber }()
+
+    let deviceIdentifier = OcaConnectionBroker.DeviceIdentifier(
+      serviceType: .tcp,
+      modelGUID: modelGUID,
+      serialNumber: serialNumber,
+      name: "E2E Reference Remote Device Missing Gain 2"
+    )
+    try await { @OcaDevice in
+      try coordinator.bindProfile(
+        profile,
+        to: deviceIdentifier,
+        deviceIndex: Self.referenceDeviceIndex
+      )
+    }()
+
+    var remoteAddress = sockaddr_in()
+    remoteAddress.sin_family = sa_family_t(AF_INET)
+    remoteAddress.sin_addr.s_addr = UInt32(INADDR_LOOPBACK).bigEndian
+    remoteAddress.sin_port = port.bigEndian
+    #if canImport(Darwin) || os(FreeBSD) || os(OpenBSD)
+    remoteAddress.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+    #endif
+    let connection = try await Ocp1TCPConnection(
+      deviceAddress: remoteAddress.socketAddressData,
+      options: connectionOptions
+    )
+    try await connection.connect()
+    defer { Task { try? await connection.disconnect() } }
+
+    await broker.register(device: deviceIdentifier, connection: connection)
+    let brokerEventTask = Task { [weak coordinator] in
+      guard let coordinator else { return }
+      for await event in await broker.events {
+        await coordinator.handleConnectionBrokerEvent(event)
+      }
+    }
+    defer { brokerEventTask.cancel() }
+
+    for _ in 0..<20 {
+      if await profile.remoteObjectCount(for: deviceIdentifier) == 3 { break }
+      try await Task.sleep(for: .milliseconds(250))
+    }
+
+    #expect(await profile.remoteObjectCount(for: deviceIdentifier) == 3)
+    #expect(await remoteGroup.members.map(\.objectNumber) == [remoteGain1.objectNumber])
+    #expect(await remoteScalar.target == OcaInvalidONo)
 
     _ = remoteDevice
   }

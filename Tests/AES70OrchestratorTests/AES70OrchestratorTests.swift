@@ -1277,10 +1277,10 @@ struct YAMLSchemaTests {
   }
 
   @Test
-  func parseClassIDWithoutClassVersionThrows() async {
+  func parseClassIDWithoutClassVersionUsesLatestSupportedVersion() async throws {
     let yaml = """
     device:
-      name: BadVersionedSchema
+      name: OptionalVersionSchema
       profiles:
         - P:
           - Gain:
@@ -1288,9 +1288,12 @@ struct YAMLSchemaTests {
               match: 0x00000200/0x00000000
     """
 
-    await #expect(throws: OcaCoordinatorError.self) {
-      try await OcaDeviceSchema(yaml: yaml)
-    }
+    let schema = try await OcaDeviceSchema(yaml: yaml)
+    let gainSchema = schema.profileSchemas[0].blocks[0]
+
+    #expect(gainSchema.declaredClassID == SwiftOCADevice.OcaGain.classID)
+    #expect(gainSchema.declaredClassVersion == nil)
+    #expect(gainSchema.type == SwiftOCADevice.OcaGain.self)
   }
 }
 

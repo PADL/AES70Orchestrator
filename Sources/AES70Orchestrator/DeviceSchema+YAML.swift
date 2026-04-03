@@ -187,18 +187,12 @@ extension OcaDeviceSchema {
       .int
       .map(OcaClassVersionNumber.init)
 
-    if declaredClassID != nil, declaredClassVersion == nil {
-      throw OcaCoordinatorError.schemaParseError(
-        "object '\(role)' declares class-id but is missing class-version"
-      )
-    }
-
     let type: SwiftOCADevice.OcaRoot.Type
-    if let classID = declaredClassID, let classVersion = declaredClassVersion {
+    if let classID = declaredClassID {
       type = try OcaDeviceClassRegistry.shared.match(
         classIdentification: OcaClassIdentification(
           classID: classID,
-          classVersion: classVersion
+          classVersion: declaredClassVersion ?? SwiftOCA.OcaRoot.classVersion
         )
       )
     } else if !actionObjects.isEmpty {

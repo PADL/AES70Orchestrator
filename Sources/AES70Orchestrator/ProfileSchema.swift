@@ -100,7 +100,7 @@ public struct OcaProfileObjectSchema: Sendable, CustomStringConvertible {
     guard let declaredClassID else { return nil }
     return OcaClassIdentification(
       classID: declaredClassID,
-      classVersion: declaredClassVersion ?? SwiftOCADevice.OcaRoot.classVersion
+      classVersion: declaredClassVersion ?? SwiftOCA.OcaRoot.classVersion
     )
   }
 

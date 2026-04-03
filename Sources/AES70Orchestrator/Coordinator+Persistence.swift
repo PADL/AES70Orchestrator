@@ -165,7 +165,13 @@ extension OcaCoordinator {
           continue
         }
         do {
+          logger.debug(
+            "load: deserializing profile \(uuidString) schema=\(schemaName) stateBytes=\(stateData.count) bindings=\(entry.restoredBindings.map(\.deviceID))"
+          )
           try await profile.deserializeState(jsonObject)
+          logger.debug(
+            "load: deserialized profile \(uuidString) schema=\(schemaName) profileONo=\(profile.objectNumber) proxyBlockONo=\(profile.proxyBlock?.objectNumber ?? OcaInvalidONo)"
+          )
         } catch {
           logger.warning("load: failed to deserialize state for profile \(uuidString): \(error)")
         }

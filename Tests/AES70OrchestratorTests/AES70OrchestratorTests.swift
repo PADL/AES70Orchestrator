@@ -1017,6 +1017,154 @@ struct PersistenceTests {
     #expect(await restored.boundDevices.contains(Self._testDeviceIdentifier.id))
     #expect(await restored.proxyBlock != nil)
   }
+
+  @Test
+  func blobSaveAndLoadPreservesGroupMembersAndReferenceProperties() async throws {
+    let modelGUID = OcaModelGUID(
+      mfrCode: .init((0xE2, 0xE2, 0xE2)),
+      modelCode: (
+        UInt8.random(in: 1...255),
+        UInt8.random(in: 0...255),
+        UInt8.random(in: 0...255),
+        UInt8.random(in: 0...255)
+      )
+    )
+    try? await OcaDeviceClassRegistry.shared.register(_ReferenceScalarDeviceObject.self)
+    try? await OcaClassRegistry.shared.register(_ReferenceScalarProxyObject.self)
+
+    let localDevice = OcaDevice()
+    try await localDevice.initializeDefaultObjects()
+    let broker = await OcaConnectionBroker(
+      connectionOptions: Ocp1ConnectionOptions(flags: [.automaticReconnect, .refreshDeviceTreeOnConnection]),
+      serviceTypes: [],
+      deviceModels: nil
+    )
+    let coordinator = try await OcaCoordinator(
+      connectionBroker: broker,
+      deviceSchema: EndToEndTests._makeReferenceSchema(modelGUID: modelGUID),
+      deviceDelegate: localDevice
+    )
+
+    let profileONo = try await coordinator.addProfile(schema: "E2EReferences")
+    let profile = try await coordinator._findProfile(oNo: profileONo)
+
+    let localGain1: SwiftOCADevice.OcaGain = await localDevice.resolve(
+      objectNumber: try EndToEndTests.localReferenceGain1ONo
+    )!
+    let localGain2: SwiftOCADevice.OcaGain = await localDevice.resolve(
+      objectNumber: try EndToEndTests.localReferenceGain2ONo
+    )!
+    let localGroup: SwiftOCADevice.OcaGroup<SwiftOCADevice.OcaGain> = await localDevice.resolve(
+      objectNumber: try EndToEndTests.localReferenceGroupONo
+    )!
+    let localScalar: _ReferenceScalarDeviceObject = await localDevice.resolve(
+      objectNumber: try EndToEndTests.localReferenceScalarONo
+    )!
+
+    try await localGroup.set(members: [localGain2])
+    await { @OcaDevice in localScalar.target = localGain2.objectNumber }()
+
+    let blob = try await coordinator.export()
+
+    let restoredDevice = OcaDevice()
+    try await restoredDevice.initializeDefaultObjects()
+    let restoredBroker = await OcaConnectionBroker(
+      connectionOptions: Ocp1ConnectionOptions(flags: [.automaticReconnect, .refreshDeviceTreeOnConnection]),
+      serviceTypes: [],
+      deviceModels: nil
+    )
+    let restoredCoordinator = try await OcaCoordinator(
+      connectionBroker: restoredBroker,
+      deviceSchema: EndToEndTests._makeReferenceSchema(modelGUID: modelGUID),
+      deviceDelegate: restoredDevice
+    )
+
+    try await restoredCoordinator.import(from: blob)
+
+    let restoredProfile = try await restoredCoordinator._findProfile(oNo: profile.objectNumber)
+    #expect(await restoredProfile.proxyBlock != nil)
+
+    let restoredGroup: SwiftOCADevice.OcaGroup<SwiftOCADevice.OcaGain> = await restoredDevice.resolve(
+      objectNumber: try EndToEndTests.localReferenceGroupONo
+    )!
+    let restoredScalar: _ReferenceScalarDeviceObject = await restoredDevice.resolve(
+      objectNumber: try EndToEndTests.localReferenceScalarONo
+    )!
+    let expectedGain2ONo = try EndToEndTests.localReferenceGain2ONo
+
+    #expect(await restoredGroup.members.map(\.objectNumber) == [expectedGain2ONo])
+    #expect(await restoredScalar.target == expectedGain2ONo)
+  }
+
+  @Test
+  func blobSaveAndLoadRemapsObjectReferencesWhenProfileIndexChanges() async throws {
+    let modelGUID = OcaModelGUID(
+      mfrCode: .init((0xE2, 0xE2, 0xE2)),
+      modelCode: (
+        UInt8.random(in: 1...255),
+        UInt8.random(in: 0...255),
+        UInt8.random(in: 0...255),
+        UInt8.random(in: 0...255)
+      )
+    )
+    try? await OcaDeviceClassRegistry.shared.register(_ReferenceScalarDeviceObject.self)
+    try? await OcaClassRegistry.shared.register(_ReferenceScalarProxyObject.self)
+
+    let localDevice = OcaDevice()
+    try await localDevice.initializeDefaultObjects()
+    let broker = await OcaConnectionBroker(
+      connectionOptions: Ocp1ConnectionOptions(flags: [.automaticReconnect, .refreshDeviceTreeOnConnection]),
+      serviceTypes: [],
+      deviceModels: nil
+    )
+    let coordinator = try await OcaCoordinator(
+      connectionBroker: broker,
+      deviceSchema: EndToEndTests._makeReferenceSchema(modelGUID: modelGUID),
+      deviceDelegate: localDevice
+    )
+
+    let profileONo = try await coordinator.addProfile(schema: "E2EReferences")
+    let profile = try await coordinator._findProfile(oNo: profileONo)
+    let uuid = profile.uuid
+
+    let localGain2: SwiftOCADevice.OcaGain = await localDevice.resolve(
+      objectNumber: try EndToEndTests.localReferenceGain2ONo
+    )!
+    let localGroup: SwiftOCADevice.OcaGroup<SwiftOCADevice.OcaGain> = await localDevice.resolve(
+      objectNumber: try EndToEndTests.localReferenceGroupONo
+    )!
+    let localScalar: _ReferenceScalarDeviceObject = await localDevice.resolve(
+      objectNumber: try EndToEndTests.localReferenceScalarONo
+    )!
+
+    try await localGroup.set(members: [localGain2])
+    await { @OcaDevice in localScalar.target = localGain2.objectNumber }()
+
+    let blob = try await coordinator.export()
+    try await coordinator.deleteProfile(uuid: uuid)
+    try await coordinator.import(from: blob)
+
+    let restoredProfile = try await coordinator.findProfile(uuid: uuid)
+    #expect(await restoredProfile.profileIndex == 2)
+
+    let expectedGain2ONo = try EndToEndTests.localReferenceGain2Mask.objectNumber(for: 2)
+    let expectedGroupONo = try EndToEndTests.localReferenceGroupMask.objectNumber(for: 2)
+    let expectedScalarONo = try EndToEndTests.localReferenceScalarMask.objectNumber(for: 2)
+
+    let restoredGroup: SwiftOCADevice.OcaGroup<SwiftOCADevice.OcaGain> = await localDevice.resolve(
+      objectNumber: expectedGroupONo
+    )!
+    let restoredScalar: _ReferenceScalarDeviceObject = await localDevice.resolve(
+      objectNumber: expectedScalarONo
+    )!
+    let restoredGain2: SwiftOCADevice.OcaGain = await localDevice.resolve(
+      objectNumber: expectedGain2ONo
+    )!
+
+    #expect(await restoredGroup.members.map(\.objectNumber) == [expectedGain2ONo])
+    #expect(await restoredScalar.target == expectedGain2ONo)
+    #expect(await restoredGain2.owner == restoredProfile.proxyBlock?.objectNumber)
+  }
 }
 
 // MARK: - YAML schema parsing tests

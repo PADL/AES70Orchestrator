@@ -422,33 +422,133 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     return map
   }
 
+  private func _buildPersistedONoPropertyIDs() throws -> Set<OcaPropertyID> {
+    let schema = try profileSchema
+    var propertyIDs: Set<OcaPropertyID> = [OcaPropertyID("2.4")]
+
+    for block in schema.blocks {
+      try block.applyRecursive { objectSchema, _, _ in
+        propertyIDs.formUnion(objectSchema.referenceProperties.keys)
+      }
+    }
+
+    return propertyIDs
+  }
+
+  private func _remapStoredONo(
+    _ oNo: OcaONo,
+    oNoMap: [OcaONo: OcaONoMask],
+    proxyBlockONo: OcaONo,
+    toMasked: Bool
+  ) -> OcaONo {
+    if oNo == proxyBlockONo || (!toMasked && oNo == 0) {
+      // proxy block: use sentinel 0 when serializing, restore actual on deserialize
+      return toMasked ? OcaONo(0) : proxyBlockONo
+    }
+
+    if toMasked, let mask = oNoMap[oNo] {
+      return mask.maskedObjectNumber(for: oNo)
+    }
+
+    if !toMasked {
+      for (_, mask) in oNoMap where mask.oNo == oNo {
+        if let remapped = try? objectNumber(for: mask) {
+          return remapped
+        }
+      }
+    }
+
+    return oNo
+  }
+
+  private func _remapPropertyValue(
+    _ value: any Sendable,
+    propertyID: OcaPropertyID,
+    oNoMap: [OcaONo: OcaONoMask],
+    proxyBlockONo: OcaONo,
+    persistedONoPropertyIDs: Set<OcaPropertyID>,
+    toMasked: Bool
+  ) -> any Sendable {
+    if propertyID == OcaPropertyID("3.2"),
+       let children = value as? [[String: any Sendable]]
+    {
+      return children.map { child in
+        _remapONos(
+          in: child,
+          oNoMap: oNoMap,
+          proxyBlockONo: proxyBlockONo,
+          persistedONoPropertyIDs: persistedONoPropertyIDs,
+          toMasked: toMasked
+        )
+      }
+    }
+
+    if let onos = value as? [OcaONo] {
+      return onos.map {
+        _remapStoredONo($0, oNoMap: oNoMap, proxyBlockONo: proxyBlockONo, toMasked: toMasked)
+      }
+    }
+
+    if let numbers = value as? [NSNumber] {
+      return numbers.map {
+        _remapStoredONo(
+          OcaONo(truncating: $0),
+          oNoMap: oNoMap,
+          proxyBlockONo: proxyBlockONo,
+          toMasked: toMasked
+        )
+      }
+    }
+
+    if let oNo = value as? OcaONo {
+      return _remapStoredONo(oNo, oNoMap: oNoMap, proxyBlockONo: proxyBlockONo, toMasked: toMasked)
+    }
+
+    if let number = value as? NSNumber {
+      return _remapStoredONo(
+        OcaONo(truncating: number),
+        oNoMap: oNoMap,
+        proxyBlockONo: proxyBlockONo,
+        toMasked: toMasked
+      )
+    }
+
+    return value
+  }
+
   private func _remapONos(
     in jsonObject: [String: any Sendable],
     oNoMap: [OcaONo: OcaONoMask],
     proxyBlockONo: OcaONo,
+    persistedONoPropertyIDs: Set<OcaPropertyID>,
     toMasked: Bool
   ) -> [String: any Sendable] {
     var result = jsonObject
 
     if let oNo = result["_oNo"] as? OcaONo {
-      if oNo == proxyBlockONo || (!toMasked && oNo == 0) {
-        // proxy block: use sentinel 0 when serializing, restore actual on deserialize
-        result["_oNo"] = toMasked ? OcaONo(0) : proxyBlockONo
-      } else if toMasked, let mask = oNoMap[oNo] {
-        result["_oNo"] = mask.maskedObjectNumber(for: oNo)
-      } else if !toMasked {
-        // find the mask entry whose base matches this masked ONo
-        for (_, mask) in oNoMap where mask.oNo == oNo {
-          result["_oNo"] = try? objectNumber(for: mask)
-          break
-        }
-      }
+      result["_oNo"] = _remapStoredONo(
+        oNo,
+        oNoMap: oNoMap,
+        proxyBlockONo: proxyBlockONo,
+        toMasked: toMasked
+      )
     }
 
-    if let children = result["3.2"] as? [[String: any Sendable]] {
-      result["3.2"] = children.map { child in
-        _remapONos(in: child, oNoMap: oNoMap, proxyBlockONo: proxyBlockONo, toMasked: toMasked)
+    for (key, value) in result {
+      guard let propertyID = try? OcaPropertyID(unsafeString: key),
+            propertyID == OcaPropertyID("3.2") || persistedONoPropertyIDs.contains(propertyID)
+      else {
+        continue
       }
+
+      result[key] = _remapPropertyValue(
+        value,
+        propertyID: propertyID,
+        oNoMap: oNoMap,
+        proxyBlockONo: proxyBlockONo,
+        persistedONoPropertyIDs: persistedONoPropertyIDs,
+        toMasked: toMasked
+      )
     }
 
     return result
@@ -457,11 +557,13 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
   func serializeState() async throws -> [String: any Sendable] {
     guard let proxyBlock else { throw Ocp1Error.status(.deviceError) }
     let oNoMap = try _buildONoMap()
+    let persistedONoPropertyIDs = try _buildPersistedONoPropertyIDs()
     let jsonObject = try await proxyBlock.serializeParameterDataset()
     return _remapONos(
       in: jsonObject,
       oNoMap: oNoMap,
       proxyBlockONo: proxyBlock.objectNumber,
+      persistedONoPropertyIDs: persistedONoPropertyIDs,
       toMasked: true
     )
   }
@@ -469,10 +571,12 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
   func deserializeState(_ jsonObject: [String: any Sendable]) async throws {
     guard let proxyBlock else { throw Ocp1Error.status(.deviceError) }
     let oNoMap = try _buildONoMap()
+    let persistedONoPropertyIDs = try _buildPersistedONoPropertyIDs()
     let remapped = _remapONos(
       in: jsonObject,
       oNoMap: oNoMap,
       proxyBlockONo: proxyBlock.objectNumber,
+      persistedONoPropertyIDs: persistedONoPropertyIDs,
       toMasked: false
     )
     try await proxyBlock.deserializeParameterDataset(remapped)

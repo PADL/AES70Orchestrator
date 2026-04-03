@@ -55,7 +55,7 @@ public final class OcaObjectBinding<
   Remote: SwiftOCA.OcaRoot
 >: OcaObjectBindingRepresentable, Sendable {
   let localObject: Local
-  let lockRemote: Bool
+  let flags: OcaProfileObjectFlags
   let includeProperties: Set<OcaPropertyID>?
   let excludeProperties: Set<OcaPropertyID>
   let referenceProperties: [OcaPropertyID: OcaProfileReferencePropertySchema]
@@ -67,6 +67,14 @@ public final class OcaObjectBinding<
 
   private static var _lockStatePropertyID: OcaPropertyID { OcaPropertyID("1.6") }
 
+  private var lockRemote: Bool {
+    flags.contains(.lockRemote)
+  }
+
+  private var remoteFollowerOnly: Bool {
+    flags.contains(.remoteFollowerOnly)
+  }
+
   private func _shouldForwardProperty(_ propertyID: OcaPropertyID) -> Bool {
     if let includeProperties {
       guard includeProperties.contains(propertyID) else { return false }
@@ -77,13 +85,13 @@ public final class OcaObjectBinding<
   public init(
     localObject: Local,
     profile: OcaProfile,
-    lockRemote: Bool = false,
+    flags: OcaProfileObjectFlags = [],
     includeProperties: Set<OcaPropertyID>? = nil,
     excludeProperties: Set<OcaPropertyID> = [],
     referenceProperties: [OcaPropertyID: OcaProfileReferencePropertySchema] = [:]
   ) {
     self.localObject = localObject
-    self.lockRemote = lockRemote
+    self.flags = flags
     self.includeProperties = includeProperties
     self.excludeProperties = excludeProperties
     self.referenceProperties = referenceProperties
@@ -293,6 +301,13 @@ public final class OcaObjectBinding<
   ) async {
     guard let eventData = try? OcaPropertyChangedEventData<Data>(data: parameters) else { return }
     guard let localEventData = try? _remapEventDataForLocal(eventData, deviceIdentifier: origin) else {
+      return
+    }
+
+    if remoteFollowerOnly {
+      profile?.coordinator?.logger.debug(
+        "handleRemoteEvent: ignoring propertyID \(localEventData.propertyID) from \(origin) for remote-follower-only object \(localObject.objectNumber)"
+      )
       return
     }
 

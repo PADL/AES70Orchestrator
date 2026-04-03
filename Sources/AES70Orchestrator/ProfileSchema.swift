@@ -27,6 +27,17 @@ public struct OcaProfileReferencePropertySchema: Sendable, Equatable {
   }
 }
 
+public struct OcaProfileObjectFlags: OptionSet, Sendable {
+  public let rawValue: UInt8
+
+  public init(rawValue: UInt8) {
+    self.rawValue = rawValue
+  }
+
+  public static let lockRemote = Self(rawValue: 1 << 0)
+  public static let remoteFollowerOnly = Self(rawValue: 1 << 1)
+}
+
 /// A struct that pairs a base OCA object number with a bitmask. The mask bits determine
 /// how many instances can be numbered within the base object number. For example,
 /// `OcaONoMask(oNo: 0x100, mask: 0x0F)` allows 16 instances (0x100–0x10F).
@@ -137,8 +148,17 @@ public struct OcaProfileObjectSchema: Sendable, CustomStringConvertible {
 
   public var isLeaf: Bool { !isContainer }
 
+  public let flags: OcaProfileObjectFlags
+
   // if true, the remote object is locked when bound and unlocked when unbound
-  public let lockRemote: Bool
+  public var lockRemote: Bool {
+    flags.contains(.lockRemote)
+  }
+
+  // if true, remote-originated property changes are ignored for this object.
+  public var remoteFollowerOnly: Bool {
+    flags.contains(.remoteFollowerOnly)
+  }
 
   // if non-nil, only these properties are forwarded (empty set means no properties)
   public let includeProperties: Set<OcaPropertyID>?
@@ -176,7 +196,9 @@ public struct OcaProfileObjectSchema: Sendable, CustomStringConvertible {
     type: SwiftOCADevice.OcaRoot.Type,
     localObjectNumber: OcaONoMask? = nil,
     remoteObjectNumber: OcaONoMask,
+    flags: OcaProfileObjectFlags = [],
     lockRemote: Bool = false,
+    remoteFollowerOnly: Bool = false,
     includeProperties: Set<OcaPropertyID>? = nil,
     excludeProperties: Set<OcaPropertyID> = [],
     referenceProperties: [OcaPropertyID: OcaProfileReferencePropertySchema] = [:],
@@ -188,7 +210,14 @@ public struct OcaProfileObjectSchema: Sendable, CustomStringConvertible {
     self.type = type
     self.localObjectNumber = localObjectNumber
     self.remoteObjectNumber = remoteObjectNumber
-    self.lockRemote = lockRemote
+    var resolvedFlags = flags
+    if lockRemote {
+      resolvedFlags.insert(.lockRemote)
+    }
+    if remoteFollowerOnly {
+      resolvedFlags.insert(.remoteFollowerOnly)
+    }
+    self.flags = resolvedFlags
     self.includeProperties = includeProperties
     self.excludeProperties = excludeProperties
     self.referenceProperties = referenceProperties

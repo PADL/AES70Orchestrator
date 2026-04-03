@@ -215,6 +215,8 @@ extension OcaDeviceSchema {
     }
 
     let lockRemote = Self._node(in: props, keys: ["lock-remote", "lockRemote"])?.bool ?? false
+    let remoteFollowerOnly =
+      Self._node(in: props, keys: ["remote-follower-only", "remoteFollowerOnly"])?.bool ?? false
 
     let includeProperties: Set<OcaPropertyID>? =
       if let seq = Self._node(in: props, keys: ["include-props", "includeProperties"])?.sequence {
@@ -240,6 +242,7 @@ extension OcaDeviceSchema {
       localObjectNumber: localObjectNumber,
       remoteObjectNumber: remoteObjectNumber,
       lockRemote: lockRemote,
+      remoteFollowerOnly: remoteFollowerOnly,
       includeProperties: includeProperties,
       excludeProperties: excludeProperties,
       referenceProperties: referenceProperties,

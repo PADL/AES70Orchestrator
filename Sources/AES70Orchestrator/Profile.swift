@@ -400,7 +400,7 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
         addObjectBinding(OcaObjectBinding<SwiftOCADevice.OcaRoot, SwiftOCA.OcaRoot>(
           localObject: object,
           profile: self,
-          lockRemote: objectSchema.lockRemote,
+          flags: objectSchema.flags,
           includeProperties: objectSchema.includeProperties,
           excludeProperties: objectSchema.excludeProperties,
           referenceProperties: objectSchema.referenceProperties

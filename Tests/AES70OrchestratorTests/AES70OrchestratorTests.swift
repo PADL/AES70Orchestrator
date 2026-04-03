@@ -1460,6 +1460,25 @@ struct EndToEndTests {
     )
   }
 
+  static func _makeRemoteFollowerOnlySchema(modelGUID: OcaModelGUID) -> OcaDeviceSchema {
+    let gainSchema = OcaProfileObjectSchema(
+      role: "Gain",
+      type: SwiftOCADevice.OcaGain.self,
+      localObjectNumber: OcaONoMask(oNo: localGainONo, mask: 0),
+      remoteObjectNumber: OcaONoMask(oNo: remoteGainONo, mask: 0),
+      remoteFollowerOnly: true
+    )
+    let profileSchema = OcaProfileSchema(
+      name: "E2EGain",
+      blocks: [gainSchema]
+    )
+    return OcaDeviceSchema(
+      name: "E2ETestDevice",
+      models: [modelGUID],
+      profileSchemas: [profileSchema]
+    )
+  }
+
   static func _makeSchemaWithMissingRemoteObject(modelGUID: OcaModelGUID) -> OcaDeviceSchema {
     let gainSchema = OcaProfileObjectSchema(
       role: "Gain",
@@ -1744,6 +1763,60 @@ struct EndToEndTests {
     #expect(remoteValue == testValue, "remote device gain should have been updated")
     let localValue = await localGain.gain.value
     #expect(localValue == testValue, "local proxy gain should have been updated")
+
+    _ = remoteDevice
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func remoteFollowerOnlyIgnoresRemoteChanges() async throws {
+    let port: UInt16 = 12349
+    let serialNumber = "E2ETest-RemoteFollowerOnly-\(UUID().uuidString)"
+    let modelGUID = Self._randomModelGUID()
+    let (remoteDevice, remoteGain, endpointTask) = try await Self._makeRemoteDevice(
+      port: port,
+      serialNumber: serialNumber,
+      modelGUID: modelGUID
+    )
+    defer { endpointTask.cancel() }
+
+    let schema = Self._makeRemoteFollowerOnlySchema(modelGUID: modelGUID)
+    let (_coordinator, localDevice, _) = try await Self._makeCoordinator(
+      port: port,
+      modelGUID: modelGUID,
+      serialNumber: serialNumber,
+      schema: schema
+    )
+
+    let localGain: SwiftOCADevice.OcaGain = await localDevice.resolve(
+      objectNumber: Self.localGainONo
+    )!
+
+    let initialValue = await localGain.gain.value
+    let testValue: OcaDB = -5.0
+
+    var remoteAddress = sockaddr_in()
+    remoteAddress.sin_family = sa_family_t(AF_INET)
+    remoteAddress.sin_addr.s_addr = UInt32(INADDR_LOOPBACK).bigEndian
+    remoteAddress.sin_port = port.bigEndian
+    #if canImport(Darwin) || os(FreeBSD) || os(OpenBSD)
+    remoteAddress.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+    #endif
+    let clientConnection = try await Ocp1TCPConnection(
+      deviceAddress: remoteAddress.socketAddressData
+    )
+    try await clientConnection.connect()
+    defer { Task { try? await clientConnection.disconnect() } }
+
+    let remoteClientGain: SwiftOCA.OcaRoot =
+      try await clientConnection.resolve(objectOfUnknownClass: Self.remoteGainONo)
+    try await remoteClientGain.sendCommandRrq(
+      methodID: OcaMethodID("4.2"),
+      parameters: testValue
+    )
+    try await Task.sleep(for: .seconds(3))
+
+    #expect(await remoteGain.gain.value == testValue, "remote device gain should have been updated")
+    #expect(await localGain.gain.value == initialValue, "local proxy gain should ignore remote-originated changes when remoteFollowerOnly is enabled")
 
     _ = remoteDevice
   }

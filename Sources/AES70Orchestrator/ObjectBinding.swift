@@ -34,6 +34,9 @@ protocol OcaObjectBindingRepresentable: Sendable {
   func hasRemoteObject(
     for deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
   ) -> Bool
+  func forgetRemoteObject(
+    for deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
+  )
   func bind(
     remoteObject: SwiftOCA.OcaRoot,
     from remoteDevice: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
@@ -97,7 +100,23 @@ public final class OcaObjectBinding<
   func hasRemoteObject(
     for deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
   ) -> Bool {
-    remoteObjects[deviceIdentifier] != nil
+    guard let remoteObject = remoteObjects[deviceIdentifier] else {
+      return false
+    }
+
+    guard remoteObject.connectionDelegate != nil else {
+      forgetRemoteObject(for: deviceIdentifier)
+      return false
+    }
+
+    return true
+  }
+
+  func forgetRemoteObject(
+    for deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
+  ) {
+    remoteObjects.removeValue(forKey: deviceIdentifier)
+    remoteSubscriptions.removeValue(forKey: deviceIdentifier)
   }
 
   private func _remapEventDataForRemote(
@@ -238,11 +257,24 @@ public final class OcaObjectBinding<
       "handleLocalEvent: forwarding propertyID \(eventData.propertyID) to \(remoteObjects.count) remote object(s)"
     )
     for (deviceID, remoteObject) in remoteObjects {
+      guard remoteObject.connectionDelegate != nil else {
+        forgetRemoteObject(for: deviceID)
+        profile?.coordinator?.logger.debug(
+          "handleLocalEvent: dropped stale remote object for \(deviceID)"
+        )
+        continue
+      }
+
       let remoteEvent = OcaEvent(emitterONo: remoteObject.objectNumber, eventID: event.eventID)
       do {
         try await remoteObject.forward(
           event: remoteEvent,
           eventData: try _remapEventDataForRemote(eventData, deviceIdentifier: deviceID)
+        )
+      } catch Ocp1Error.noConnectionDelegate {
+        forgetRemoteObject(for: deviceID)
+        profile?.coordinator?.logger.debug(
+          "handleLocalEvent: dropped stale remote object for \(deviceID) after missing connection delegate"
         )
       } catch {
         profile?.coordinator?.logger.warning(

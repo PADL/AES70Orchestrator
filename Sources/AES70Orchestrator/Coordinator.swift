@@ -318,6 +318,7 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
       for profile in entry.profiles.actionObjects {
         guard profile.deviceIndices[deviceIdentifier] != nil else { continue }
         await _deactivateProfile(profile, from: deviceIdentifier)
+        profile.forgetRemoteObjects(for: deviceIdentifier)
         if profile.isAutomaticallyBound {
           try? await _unbindProfile(profile, from: deviceIdentifier)
         }

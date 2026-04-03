@@ -162,6 +162,14 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     }.count
   }
 
+  func forgetRemoteObjects(
+    for deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
+  ) {
+    for binding in objectBindings.values {
+      binding.forgetRemoteObject(for: deviceIdentifier)
+    }
+  }
+
   func handleLocalEvent(_ event: OcaEvent, parameters: Data) async {
     if let binding = objectBindings[event.emitterONo] {
       coordinator?.logger.trace(

@@ -222,7 +222,7 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
     _nextProfileONo = baseONo
     await device.setEventDelegate(self)
     _startEventMonitor()
-    logger.info("Coordinator initialized with schemas: \(deviceSchema.profileSchemas.map(\.name))")
+    logger.debug("Coordinator initialized with schemas: \(deviceSchema.profileSchemas.map(\.name))")
   }
 
   @OcaDevice

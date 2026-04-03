@@ -48,6 +48,9 @@ extension SwiftOCADevice.OcaBlock: _OcaBlockContainer {
 /// remote devices and manages a set of local proxy objects that mirror remote device objects.
 @OcaDevice
 public final class OcaProfile: SwiftOCADevice.OcaAgent {
+  private nonisolated static let _actionObjectsPropertyID = OcaPropertyID("3.2")
+  private nonisolated static let _ownerPropertyID = OcaPropertyID("2.4")
+
   override public class var classID: OcaClassID { OcaClassID(
     parent: super.classID,
     authority: PADLCompanyID,
@@ -422,19 +425,6 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     return map
   }
 
-  private func _buildPersistedONoPropertyIDs() throws -> Set<OcaPropertyID> {
-    let schema = try profileSchema
-    var propertyIDs: Set<OcaPropertyID> = [OcaPropertyID("2.4")]
-
-    for block in schema.blocks {
-      try block.applyRecursive { objectSchema, _, _ in
-        propertyIDs.formUnion(objectSchema.referenceProperties.keys)
-      }
-    }
-
-    return propertyIDs
-  }
-
   private func _remapStoredONo(
     _ oNo: OcaONo,
     oNoMap: [OcaONo: OcaONoMask],
@@ -464,23 +454,32 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
   private func _remapPropertyValue(
     _ value: any Sendable,
     propertyID: OcaPropertyID,
+    schema: OcaProfileObjectSchema?,
+    childSchemas: [OcaProfileObjectSchema],
     oNoMap: [OcaONo: OcaONoMask],
     proxyBlockONo: OcaONo,
-    persistedONoPropertyIDs: Set<OcaPropertyID>,
     toMasked: Bool
   ) -> any Sendable {
-    if propertyID == OcaPropertyID("3.2"),
+    if propertyID == Self._actionObjectsPropertyID,
        let children = value as? [[String: any Sendable]]
     {
-      return children.map { child in
-        _remapONos(
+      let nestedSchemas = schema?.actionObjectSchema ?? childSchemas
+      return children.enumerated().map { index, child in
+        let childSchema: OcaProfileObjectSchema? =
+          nestedSchemas.indices.contains(index) ? nestedSchemas[index] : nil
+        return _remapONos(
           in: child,
+          schema: childSchema,
+          childSchemas: childSchema?.actionObjectSchema ?? [],
           oNoMap: oNoMap,
           proxyBlockONo: proxyBlockONo,
-          persistedONoPropertyIDs: persistedONoPropertyIDs,
           toMasked: toMasked
         )
       }
+    } else if propertyID != Self._ownerPropertyID,
+              schema?.referenceProperty(for: propertyID) == nil
+    {
+      return value
     } else if let onos = value as? [OcaONo] {
       return onos.map {
         _remapStoredONo($0, oNoMap: oNoMap, proxyBlockONo: proxyBlockONo, toMasked: toMasked)
@@ -510,9 +509,10 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
 
   private func _remapONos(
     in jsonObject: [String: any Sendable],
+    schema: OcaProfileObjectSchema?,
+    childSchemas: [OcaProfileObjectSchema],
     oNoMap: [OcaONo: OcaONoMask],
     proxyBlockONo: OcaONo,
-    persistedONoPropertyIDs: Set<OcaPropertyID>,
     toMasked: Bool
   ) -> [String: any Sendable] {
     var result = jsonObject
@@ -524,11 +524,20 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
         proxyBlockONo: proxyBlockONo,
         toMasked: toMasked
       )
+    } else if let number = result["_oNo"] as? NSNumber {
+      result["_oNo"] = _remapStoredONo(
+        OcaONo(truncating: number),
+        oNoMap: oNoMap,
+        proxyBlockONo: proxyBlockONo,
+        toMasked: toMasked
+      )
     }
 
     for (key, value) in result {
       guard let propertyID = try? OcaPropertyID(unsafeString: key),
-            propertyID == OcaPropertyID("3.2") || persistedONoPropertyIDs.contains(propertyID)
+            propertyID == Self._actionObjectsPropertyID
+              || propertyID == Self._ownerPropertyID
+              || schema?.referenceProperty(for: propertyID) != nil
       else {
         continue
       }
@@ -536,9 +545,10 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
       result[key] = _remapPropertyValue(
         value,
         propertyID: propertyID,
+        schema: schema,
+        childSchemas: childSchemas,
         oNoMap: oNoMap,
         proxyBlockONo: proxyBlockONo,
-        persistedONoPropertyIDs: persistedONoPropertyIDs,
         toMasked: toMasked
       )
     }
@@ -548,27 +558,29 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
 
   func serializeState() async throws -> [String: any Sendable] {
     guard let proxyBlock else { throw Ocp1Error.status(.deviceError) }
+    let schema = try profileSchema
     let oNoMap = try _buildONoMap()
-    let persistedONoPropertyIDs = try _buildPersistedONoPropertyIDs()
     let jsonObject = try await proxyBlock.serializeParameterDataset()
     return _remapONos(
       in: jsonObject,
+      schema: nil,
+      childSchemas: schema.blocks,
       oNoMap: oNoMap,
       proxyBlockONo: proxyBlock.objectNumber,
-      persistedONoPropertyIDs: persistedONoPropertyIDs,
       toMasked: true
     )
   }
 
   func deserializeState(_ jsonObject: [String: any Sendable]) async throws {
     guard let proxyBlock else { throw Ocp1Error.status(.deviceError) }
+    let schema = try profileSchema
     let oNoMap = try _buildONoMap()
-    let persistedONoPropertyIDs = try _buildPersistedONoPropertyIDs()
     let remapped = _remapONos(
       in: jsonObject,
+      schema: nil,
+      childSchemas: schema.blocks,
       oNoMap: oNoMap,
       proxyBlockONo: proxyBlock.objectNumber,
-      persistedONoPropertyIDs: persistedONoPropertyIDs,
       toMasked: false
     )
     try await proxyBlock.deserializeParameterDataset(remapped)

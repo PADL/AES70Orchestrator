@@ -1165,6 +1165,75 @@ struct PersistenceTests {
     #expect(await restoredScalar.target == expectedGain2ONo)
     #expect(await restoredGain2.owner == restoredProfile.proxyBlock?.objectNumber)
   }
+
+  @Test
+  func blobSaveAndLoadDoesNotRemapNonReferenceIntegerProperties() async throws {
+    let modelGUID = OcaModelGUID(
+      mfrCode: .init((0xE2, 0xE2, 0xE2)),
+      modelCode: (
+        UInt8.random(in: 1...255),
+        UInt8.random(in: 0...255),
+        UInt8.random(in: 0...255),
+        UInt8.random(in: 0...255)
+      )
+    )
+    try? await OcaDeviceClassRegistry.shared.register(_ReferenceScalarDeviceObject.self)
+    try? await OcaClassRegistry.shared.register(_ReferenceScalarProxyObject.self)
+
+    let localDevice = OcaDevice()
+    try await localDevice.initializeDefaultObjects()
+    let broker = await OcaConnectionBroker(
+      connectionOptions: Ocp1ConnectionOptions(flags: [.automaticReconnect, .refreshDeviceTreeOnConnection]),
+      serviceTypes: [],
+      deviceModels: nil
+    )
+    let coordinator = try await OcaCoordinator(
+      connectionBroker: broker,
+      deviceSchema: EndToEndTests._makeReferenceSchemaWithPlainScalar(modelGUID: modelGUID),
+      deviceDelegate: localDevice
+    )
+
+    let profileONo = try await coordinator.addProfile(schema: "E2EReferencesWithPlainScalar")
+    let profile = try await coordinator._findProfile(oNo: profileONo)
+    let uuid = profile.uuid
+
+    let localGain2: SwiftOCADevice.OcaGain = await localDevice.resolve(
+      objectNumber: try EndToEndTests.localReferenceGain2ONo
+    )!
+    let localScalar: _ReferenceScalarDeviceObject = await localDevice.resolve(
+      objectNumber: try EndToEndTests.localReferenceScalarONo
+    )!
+    let plainScalar: _PlainScalarDeviceObject = await localDevice.resolve(
+      objectNumber: try EndToEndTests.localPlainScalarONo
+    )!
+    let rawIntegerValue = OcaUint32(localGain2.objectNumber)
+
+    await { @OcaDevice in
+      localScalar.target = localGain2.objectNumber
+      plainScalar.value = rawIntegerValue
+    }()
+
+    let blob = try await coordinator.export()
+    try await coordinator.deleteProfile(uuid: uuid)
+    try await coordinator.import(from: blob)
+
+    let restoredProfile = try await coordinator.findProfile(uuid: uuid)
+    #expect(await restoredProfile.profileIndex == 2)
+
+    let expectedPlainScalarONo = try EndToEndTests.localPlainScalarMask.objectNumber(for: 2)
+    let expectedReferenceScalarONo = try EndToEndTests.localReferenceScalarMask.objectNumber(for: 2)
+    let expectedGain2ONo = try EndToEndTests.localReferenceGain2Mask.objectNumber(for: 2)
+
+    let restoredScalar: _ReferenceScalarDeviceObject = await localDevice.resolve(
+      objectNumber: expectedReferenceScalarONo
+    )!
+    let restoredPlainScalar: _PlainScalarDeviceObject = await localDevice.resolve(
+      objectNumber: expectedPlainScalarONo
+    )!
+
+    #expect(await restoredScalar.target == expectedGain2ONo)
+    #expect(await restoredPlainScalar.value == rawIntegerValue)
+  }
 }
 
 // MARK: - YAML schema parsing tests
@@ -1202,6 +1271,22 @@ final class _ReferenceScalarDeviceObject: SwiftOCADevice.OcaWorker {
     setMethodID: OcaMethodID("4.2")
   )
   var target: OcaONo = OcaInvalidONo
+}
+
+@OcaDevice
+final class _PlainScalarDeviceObject: SwiftOCADevice.OcaWorker {
+  override class var classID: OcaClassID { OcaClassID(
+    parent: SwiftOCADevice.OcaWorker.classID,
+    authority: PADLCompanyID,
+    2001
+  ) }
+
+  @OcaDeviceProperty(
+    propertyID: OcaPropertyID("4.1"),
+    getMethodID: OcaMethodID("4.1"),
+    setMethodID: OcaMethodID("4.2")
+  )
+  var value: OcaUint32 = 0
 }
 
 @Suite
@@ -1494,6 +1579,8 @@ struct EndToEndTests {
   static let remoteReferenceGroupMask = OcaONoMask(oNo: 0x4000_0030, mask: 0x0300_0000)
   static let localReferenceScalarMask = OcaONoMask(oNo: 0x0000_0040, mask: 0x0F00_0000)
   static let remoteReferenceScalarMask = OcaONoMask(oNo: 0x4000_0040, mask: 0x0300_0000)
+  static let localPlainScalarMask = OcaONoMask(oNo: 0x0000_0050, mask: 0x0F00_0000)
+  static let remotePlainScalarMask = OcaONoMask(oNo: 0x4000_0050, mask: 0x0300_0000)
 
   static var localReferenceGain1ONo: OcaONo {
     get throws { try localReferenceGain1Mask.objectNumber(for: 1) }
@@ -1525,6 +1612,10 @@ struct EndToEndTests {
 
   static var remoteReferenceScalarONo: OcaONo {
     get throws { try remoteReferenceScalarMask.objectNumber(for: referenceDeviceIndex) }
+  }
+
+  static var localPlainScalarONo: OcaONo {
+    get throws { try localPlainScalarMask.objectNumber(for: 1) }
   }
 
   private static func _randomModelGUID() -> OcaModelGUID {
@@ -1689,6 +1780,58 @@ struct EndToEndTests {
       name: "E2EReferenceDevice",
       models: [modelGUID],
       profileSchemas: [OcaProfileSchema(name: "E2EReferences", blocks: [gain1, gain2, group, scalar])]
+    )
+  }
+
+  static func _makeReferenceSchemaWithPlainScalar(modelGUID: OcaModelGUID) -> OcaDeviceSchema {
+    let referenceTarget = OcaONoMask(oNo: 0x4000_0010, mask: 0x0300_0000)
+    let gain1 = OcaProfileObjectSchema(
+      role: "Gain 1",
+      type: SwiftOCADevice.OcaGain.self,
+      localObjectNumber: localReferenceGain1Mask,
+      remoteObjectNumber: remoteReferenceGain1Mask
+    )
+    let gain2 = OcaProfileObjectSchema(
+      role: "Gain 2",
+      type: SwiftOCADevice.OcaGain.self,
+      localObjectNumber: localReferenceGain2Mask,
+      remoteObjectNumber: remoteReferenceGain2Mask
+    )
+    let group = OcaProfileObjectSchema(
+      role: "Group",
+      type: SwiftOCADevice.OcaGroup<SwiftOCADevice.OcaGain>.self,
+      localObjectNumber: localReferenceGroupMask,
+      remoteObjectNumber: remoteReferenceGroupMask,
+      includeProperties: [OcaPropertyID("3.1")],
+      referenceProperties: [
+        OcaPropertyID("3.1"): OcaProfileReferencePropertySchema(targetMatch: referenceTarget),
+      ]
+    )
+    let scalar = OcaProfileObjectSchema(
+      role: "Scalar",
+      type: _ReferenceScalarDeviceObject.self,
+      localObjectNumber: localReferenceScalarMask,
+      remoteObjectNumber: remoteReferenceScalarMask,
+      referenceProperties: [
+        OcaPropertyID("4.1"): OcaProfileReferencePropertySchema(targetMatch: referenceTarget),
+      ]
+    )
+    let plainScalar = OcaProfileObjectSchema(
+      role: "Plain Scalar",
+      type: _PlainScalarDeviceObject.self,
+      localObjectNumber: localPlainScalarMask,
+      remoteObjectNumber: remotePlainScalarMask
+    )
+
+    return OcaDeviceSchema(
+      name: "E2EReferenceDevice",
+      models: [modelGUID],
+      profileSchemas: [
+        OcaProfileSchema(
+          name: "E2EReferencesWithPlainScalar",
+          blocks: [gain1, gain2, group, scalar, plainScalar]
+        )
+      ]
     )
   }
 

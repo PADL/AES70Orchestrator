@@ -267,7 +267,7 @@ public final class OcaObjectBinding<
     for (deviceID, remoteObject) in remoteObjects {
       guard remoteObject.connectionDelegate != nil else {
         forgetRemoteObject(for: deviceID)
-        profile?.coordinator?.logger.debug(
+        profile?.coordinator?.logger.trace(
           "handleLocalEvent: dropped stale remote object for \(deviceID)"
         )
         continue
@@ -281,7 +281,7 @@ public final class OcaObjectBinding<
         )
       } catch Ocp1Error.noConnectionDelegate {
         forgetRemoteObject(for: deviceID)
-        profile?.coordinator?.logger.debug(
+        profile?.coordinator?.logger.trace(
           "handleLocalEvent: dropped stale remote object for \(deviceID) after missing connection delegate"
         )
       } catch {

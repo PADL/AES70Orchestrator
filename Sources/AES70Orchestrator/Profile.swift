@@ -138,10 +138,10 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
 
   private var _labelMonitorTask: Task<(), Never>?
 
-  /// When true, remote subscription events are suppressed to prevent the
-  /// remote device's current values from overwriting the local proxy state
-  /// during activation (initial property copy).
-  var isActivating = false
+  /// Devices currently being activated. Remote subscription events from these
+  /// devices are suppressed to prevent the remote device's current values from
+  /// overwriting the local proxy state during activation (initial property copy).
+  var activatingDevices = Set<SwiftOCA.OcaConnectionBroker.DeviceIdentifier>()
 
   // maps local device object numbers to their bindings for efficient event dispatch
   private var objectBindings = [OcaONo: any OcaObjectBindingRepresentable]()
@@ -273,11 +273,14 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     return try oNoMask.objectNumber(for: profileIndex)
   }
 
+  /// Build local↔remote ONo maps filtered to objects whose remote ONo matches `targetMatch`.
+  /// In practice all local ONos within a profile are unique, so the filter is defensive —
+  /// the dictionary lookup alone would resolve correctly. But filtering by `targetMatch`
+  /// ensures we never accidentally remap an ONo that belongs to a different target family.
   private func _referenceMaps(
     deviceIndex: OcaONo,
     targetMatch: OcaONoMask
   ) throws -> (localToRemote: [OcaONo: OcaONo], remoteToLocal: [OcaONo: OcaONo]) {
-    _ = targetMatch
     let schema = try profileSchema
     var localToRemote = [OcaONo: OcaONo]()
     var remoteToLocal = [OcaONo: OcaONo]()
@@ -287,6 +290,12 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
         guard let localObjectNumber = objectSchema.localObjectNumber,
               let localONo = try objectNumber(for: localObjectNumber)
         else {
+          return
+        }
+
+        // only include objects whose remote ONo base matches the target family
+        let remoteBase = objectSchema.remoteObjectNumber.oNo
+        if remoteBase & ~targetMatch.mask != targetMatch.oNo & ~targetMatch.mask {
           return
         }
 

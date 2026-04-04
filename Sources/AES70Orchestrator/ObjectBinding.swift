@@ -204,6 +204,9 @@ public final class OcaObjectBinding<
   ) async throws {
     guard !referenceProperties.isEmpty || includeProperties != nil || !excludeProperties.isEmpty
     else {
+      profile?.coordinator?.logger.trace(
+        "_copyProperties(fast): local \(localObject.objectNumber) -> remote \(remoteObject.objectNumber) copying all properties"
+      )
       try await localObject.copyProperties(to: remoteObject)
       return
     }
@@ -342,7 +345,7 @@ public final class OcaObjectBinding<
 
     if remoteFollowerOnly || profile?.activatingDevices.contains(origin) == true {
       profile?.coordinator?.logger.trace(
-        "handleRemoteEvent: ignoring propertyID \(localEventData.propertyID) from \(origin) for \(remoteFollowerOnly ? "remote-follower-only" : "activating") object \(localObject.objectNumber)"
+        "handleRemoteEvent: ignoring propertyID \(localEventData.propertyID) value=\(Array(localEventData.propertyValue)) from \(origin) for \(remoteFollowerOnly ? "remote-follower-only" : "activating") object \(localObject.objectNumber)"
       )
       return
     }

@@ -169,6 +169,9 @@ public struct OcaProfileObjectSchema: Sendable, CustomStringConvertible {
   // properties whose payload contains ONo references that must be translated at bind/sync time
   public let referenceProperties: [OcaPropertyID: OcaProfileReferencePropertySchema]
 
+  // default property values applied after proxy object creation
+  public let propertyDefaults: [OcaPropertyID: [String: any Sendable]]
+
   public let actionObjectSchema: [Self]
 
   public var description: String {
@@ -202,6 +205,7 @@ public struct OcaProfileObjectSchema: Sendable, CustomStringConvertible {
     includeProperties: Set<OcaPropertyID>? = nil,
     excludeProperties: Set<OcaPropertyID> = [],
     referenceProperties: [OcaPropertyID: OcaProfileReferencePropertySchema] = [:],
+    propertyDefaults: [OcaPropertyID: [String: any Sendable]] = [:],
     actionObjectSchema: [Self] = []
   ) {
     self.role = role
@@ -221,6 +225,7 @@ public struct OcaProfileObjectSchema: Sendable, CustomStringConvertible {
     self.includeProperties = includeProperties
     self.excludeProperties = excludeProperties
     self.referenceProperties = referenceProperties
+    self.propertyDefaults = propertyDefaults
     self.actionObjectSchema = actionObjectSchema
   }
 

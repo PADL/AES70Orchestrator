@@ -429,6 +429,16 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
           deviceDelegate: coordinator.device
         )
 
+        if !objectSchema.propertyDefaults.isEmpty {
+          try await object.deserialize(
+            jsonObject: Self._propertyDefaultsJsonObject(
+              for: object,
+              from: objectSchema.propertyDefaults
+            ),
+            flags: .ignoreMissingProperties
+          )
+        }
+
         if objectSchema.isContainer, let block = object as? (any _OcaBlockContainer) {
           blocks[rolePath] = block
         }
@@ -449,6 +459,37 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
         ), for: object.objectNumber)
       }
     }
+  }
+
+  /// Convert YAML-friendly property defaults into the JSON format expected by
+  /// ``SwiftOCADevice.OcaRoot/deserialize(jsonObject:flags:filter:)``.
+  ///
+  /// Bounded properties use `{value, min, max}` in the YAML which maps to
+  /// the `{v, l, u}` keys used by ``OcaBoundedDeviceProperty``.
+  private static func _propertyDefaultsJsonObject(
+    for object: SwiftOCADevice.OcaRoot,
+    from defaults: [OcaPropertyID: [String: any Sendable]]
+  ) -> [String: any Sendable] {
+    var json: [String: any Sendable] = [
+      "oNo": object.objectNumber,
+      "classID": type(of: object).classID.description,
+    ]
+    for (propertyID, dict) in defaults {
+      if dict["value"] != nil, dict["min"] != nil, dict["max"] != nil {
+        // Bounded property: remap to the {v, l, u} format
+        json[propertyID.description] = [
+          "v": dict["value"]!,
+          "l": dict["min"]!,
+          "u": dict["max"]!,
+        ]
+      } else {
+        // Scalar property: use value directly
+        if let value = dict["value"] {
+          json[propertyID.description] = value
+        }
+      }
+    }
+    return json
   }
 
   private func _buildONoMap() throws -> [OcaONo: OcaONoMask] {

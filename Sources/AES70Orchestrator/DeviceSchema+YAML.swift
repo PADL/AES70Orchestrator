@@ -98,6 +98,44 @@ extension OcaDeviceSchema {
     return OcaProfileReferencePropertySchema(targetMatch: try OcaONoMask(targetMatchString))
   }
 
+  private static func _parsePropertyDefaults(
+    _ node: Node?
+  ) throws -> [OcaPropertyID: [String: any Sendable]] {
+    guard let mapping = node?.mapping else { return [:] }
+
+    var defaults = [OcaPropertyID: [String: any Sendable]]()
+    for (propertyNode, valueNode) in mapping {
+      guard let propertyString = propertyNode.string else {
+        throw OcaCoordinatorError.schemaParseError(
+          "property-defaults key must be a property ID string"
+        )
+      }
+      let propertyID = try OcaPropertyID(unsafeString: propertyString)
+
+      guard let valueMapping = valueNode.mapping else {
+        throw OcaCoordinatorError.schemaParseError(
+          "property-defaults value for '\(propertyString)' must be a mapping"
+        )
+      }
+
+      var dict = [String: any Sendable]()
+      for (key, val) in valueMapping {
+        guard let keyString = key.string else { continue }
+        if let doubleValue = val.float {
+          dict[keyString] = doubleValue
+        } else if let intValue = val.int {
+          dict[keyString] = Double(intValue)
+        } else if let boolValue = val.bool {
+          dict[keyString] = boolValue
+        } else if let stringValue = val.string {
+          dict[keyString] = stringValue
+        }
+      }
+      defaults[propertyID] = dict
+    }
+    return defaults
+  }
+
   private static func _parseReferenceProperties(
     _ node: Node?
   ) throws -> [OcaPropertyID: OcaProfileReferencePropertySchema] {
@@ -234,6 +272,10 @@ extension OcaDeviceSchema {
       Self._node(in: props, keys: ["reference-props", "referenceProperties"])
     )
 
+    let propertyDefaults = try _parsePropertyDefaults(
+      Self._node(in: props, keys: ["property-defaults", "propertyDefaults"])
+    )
+
     return OcaProfileObjectSchema(
       role: role,
       declaredClassID: declaredClassID,
@@ -246,6 +288,7 @@ extension OcaDeviceSchema {
       includeProperties: includeProperties,
       excludeProperties: excludeProperties,
       referenceProperties: referenceProperties,
+      propertyDefaults: propertyDefaults,
       actionObjectSchema: actionObjects
     )
   }

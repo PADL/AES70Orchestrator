@@ -41,6 +41,9 @@ protocol OcaObjectBindingRepresentable: Sendable {
     remoteObject: SwiftOCA.OcaRoot,
     from remoteDevice: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
   ) async throws
+  func subscribe(
+    to remoteDevice: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
+  ) async throws
   func unbind(
     remoteObject: SwiftOCA.OcaRoot,
     from remoteDevice: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
@@ -317,14 +320,22 @@ public final class OcaObjectBinding<
     parameters: Data,
     deviceIdentifier origin: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
   ) async {
-    guard let eventData = try? OcaPropertyChangedEventData<Data>(data: parameters) else { return }
+    guard let eventData = try? OcaPropertyChangedEventData<Data>(data: parameters) else {
+      profile?.coordinator?.logger.trace(
+        "handleRemoteEvent: failed to decode event data from \(origin) for ONo \(event.emitterONo)"
+      )
+      return
+    }
     guard let localEventData = try? _remapEventDataForLocal(eventData, deviceIdentifier: origin) else {
+      profile?.coordinator?.logger.trace(
+        "handleRemoteEvent: failed to remap event data from \(origin) for propertyID \(eventData.propertyID)"
+      )
       return
     }
 
-    if remoteFollowerOnly || profile?.isActivating == true {
+    if remoteFollowerOnly {
       profile?.coordinator?.logger.trace(
-        "handleRemoteEvent: ignoring propertyID \(localEventData.propertyID) from \(origin) for \(remoteFollowerOnly ? "remote-follower-only" : "activating") object \(localObject.objectNumber)"
+        "handleRemoteEvent: ignoring propertyID \(localEventData.propertyID) from \(origin) for remote-follower-only object \(localObject.objectNumber)"
       )
       return
     }
@@ -338,18 +349,43 @@ public final class OcaObjectBinding<
     if !(lockRemote && localEventData.propertyID == Self._lockStatePropertyID) {
       let localEvent = OcaEvent(emitterONo: localObject.objectNumber, eventID: event.eventID)
       if referenceProperties[localEventData.propertyID] != nil {
-        try? await _applyReferencePropertyToLocal(localEventData)
+        do {
+          try await _applyReferencePropertyToLocal(localEventData)
+        } catch {
+          profile?.coordinator?.logger.trace(
+            "handleRemoteEvent: failed to apply reference property \(localEventData.propertyID) to local object \(localObject.objectNumber): \(error)"
+          )
+        }
       } else {
-        try? await localObject.forward(event: localEvent, eventData: localEventData)
+        do {
+          try await localObject.forward(event: localEvent, eventData: localEventData)
+        } catch {
+          profile?.coordinator?.logger.trace(
+            "handleRemoteEvent: failed to forward propertyID \(localEventData.propertyID) to local object \(localObject.objectNumber): \(error)"
+          )
+        }
       }
     }
 
     // forward to all other remote objects (excluding origin)
     for (deviceID, remoteObject) in remoteObjects where deviceID != origin {
       let remoteEvent = OcaEvent(emitterONo: remoteObject.objectNumber, eventID: event.eventID)
-      let forwardedEventData =
-        (try? _remapEventDataForRemote(localEventData, deviceIdentifier: deviceID)) ?? localEventData
-      try? await remoteObject.forward(event: remoteEvent, eventData: forwardedEventData)
+      let forwardedEventData: OcaAnyPropertyChangedEventData
+      do {
+        forwardedEventData = try _remapEventDataForRemote(localEventData, deviceIdentifier: deviceID)
+      } catch {
+        profile?.coordinator?.logger.trace(
+          "handleRemoteEvent: failed to remap event data for \(deviceID): \(error)"
+        )
+        forwardedEventData = localEventData
+      }
+      do {
+        try await remoteObject.forward(event: remoteEvent, eventData: forwardedEventData)
+      } catch {
+        profile?.coordinator?.logger.trace(
+          "handleRemoteEvent: failed to forward to remote \(deviceID): \(error)"
+        )
+      }
     }
   }
 
@@ -369,7 +405,12 @@ public final class OcaObjectBinding<
     if lockRemote {
       try? await remoteObject.setLockNoReadWrite()
     }
+  }
 
+  public func subscribe(
+    to remoteDevice: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
+  ) async throws {
+    guard let remoteObject = remoteObjects[remoteDevice] else { return }
     guard let connectionDelegate = remoteObject.connectionDelegate else {
       throw Ocp1Error.noConnectionDelegate
     }

@@ -517,6 +517,8 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
         "activate: profileONo=\(profile.objectNumber) schema=\(profile.schemaName) device=\(deviceIdentifier.id) index=\(index) blocks=\(schema.blocks.map(\.role))"
       )
       do {
+        profile.isActivating = true
+        defer { profile.isActivating = false }
         for block in schema.blocks {
           try await profile.bindRemoteObjects(
             to: deviceIdentifier, deviceIndex: index,

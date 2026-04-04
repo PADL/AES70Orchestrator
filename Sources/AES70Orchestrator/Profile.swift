@@ -138,6 +138,11 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
 
   private var _labelMonitorTask: Task<(), Never>?
 
+  /// When true, remote subscription events are suppressed to prevent the
+  /// remote device's current values from overwriting the local proxy state
+  /// during activation (initial property copy).
+  var isActivating = false
+
   // maps local device object numbers to their bindings for efficient event dispatch
   private var objectBindings = [OcaONo: any OcaObjectBindingRepresentable]()
 

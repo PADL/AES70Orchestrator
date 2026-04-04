@@ -360,7 +360,7 @@ public final class OcaObjectBinding<
       throw Ocp1Error.status(.parameterError)
     }
     remoteObjects[remoteDevice] = remoteObject
-    profile?.coordinator?.logger.debug(
+    profile?.coordinator?.logger.trace(
       "bind: local object \(localObject.objectNumber) bound to remote object \(remoteObject.objectNumber) on \(remoteDevice)"
     )
     try await _copyProperties(to: remoteObject, remoteDevice: remoteDevice)

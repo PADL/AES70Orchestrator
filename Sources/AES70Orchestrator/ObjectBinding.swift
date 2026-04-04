@@ -199,7 +199,8 @@ public final class OcaObjectBinding<
     to remoteObject: Remote,
     remoteDevice: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
   ) async throws {
-    guard !referenceProperties.isEmpty else {
+    guard !referenceProperties.isEmpty || includeProperties != nil || !excludeProperties.isEmpty
+    else {
       try await localObject.copyProperties(to: remoteObject)
       return
     }

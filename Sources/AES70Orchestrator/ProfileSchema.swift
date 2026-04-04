@@ -103,8 +103,11 @@ public struct OcaONoMask: Sendable, Equatable, CustomStringConvertible {
 public struct OcaProfileObjectSchema: Sendable, CustomStringConvertible {
   public let role: String
 
-  // the class ID declared in the schema, if present
+  /// The class ID declared in the schema, if present.
   public let declaredClassID: OcaClassID?
+  /// The class version declared in the schema, or `nil` if omitted. When `nil`, the
+  /// registry resolves `type` using the latest registered class whose class ID is a
+  /// prefix match, and `declaredClassIdentification` falls back to `OcaRoot.classVersion`.
   public let declaredClassVersion: OcaClassVersionNumber?
 
   public var declaredClassIdentification: OcaClassIdentification? {

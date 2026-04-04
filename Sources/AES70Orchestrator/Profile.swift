@@ -471,8 +471,8 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     from defaults: [OcaPropertyID: [String: any Sendable]]
   ) -> [String: any Sendable] {
     var json: [String: any Sendable] = [
-      "oNo": object.objectNumber,
-      "classID": type(of: object).classID.description,
+      "_oNo": object.objectNumber,
+      "_classID": type(of: object).classID.description,
     ]
     for (propertyID, dict) in defaults {
       if dict["value"] != nil, dict["min"] != nil, dict["max"] != nil {

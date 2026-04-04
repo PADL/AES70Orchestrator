@@ -137,43 +137,43 @@ extension OcaCoordinator {
         let profileONo = try await addProfile(schema: schemaName, name: entry.name, uuid: uuid)
         let profile = try _findProfile(oNo: profileONo)
 
-        // restore bound devices
+        // restore profile state before binding so local objects have their
+        // saved values when _copyProperties runs at bind time
+        guard profile.proxyBlock != nil else { continue }
+        let statePath = _profileStatePath(for: schemaName, uuid: uuidString)
+        if let stateEntry = archive[statePath] {
+          var stateData = Data()
+          _ = try archive.extract(stateEntry) { data in
+            stateData.append(data)
+          }
+          if let jsonObject = try JSONSerialization.jsonObject(
+            with: stateData
+          ) as? [String: any Sendable] {
+            do {
+              logger.debug(
+                "load: deserializing profile \(uuidString) schema=\(schemaName) stateBytes=\(stateData.count) bindings=\(entry.restoredBindings.map(\.deviceID))"
+              )
+              try await profile.deserializeState(jsonObject)
+              logger.debug(
+                "load: deserialized profile \(uuidString) schema=\(schemaName) profileONo=\(profile.objectNumber) proxyBlockONo=\(profile.proxyBlock?.objectNumber ?? OcaInvalidONo)"
+              )
+            } catch {
+              logger.warning("load: failed to deserialize state for profile \(uuidString): \(error)")
+            }
+          } else {
+            logger.warning("load: invalid state data for profile \(uuidString)")
+          }
+        } else {
+          logger.warning("load: missing state entry for profile \(uuidString)")
+        }
+
+        // restore bound devices after state so _copyProperties sends saved values
         for binding in entry.restoredBindings {
           guard let deviceIdentifier = OcaConnectionBroker.DeviceIdentifier(binding.deviceID) else {
             logger.warning("load: invalid device identifier \(binding.deviceID)")
             continue
           }
           try await bindProfile(profile, to: deviceIdentifier, deviceIndex: binding.deviceIndex)
-        }
-
-        // restore profile state with ONo remapping
-        guard profile.proxyBlock != nil else { continue }
-        let statePath = _profileStatePath(for: schemaName, uuid: uuidString)
-        guard let stateEntry = archive[statePath] else {
-          logger.warning("load: missing state entry for profile \(uuidString)")
-          continue
-        }
-
-        var stateData = Data()
-        _ = try archive.extract(stateEntry) { data in
-          stateData.append(data)
-        }
-        guard let jsonObject = try JSONSerialization.jsonObject(
-          with: stateData
-        ) as? [String: any Sendable] else {
-          logger.warning("load: invalid state data for profile \(uuidString)")
-          continue
-        }
-        do {
-          logger.debug(
-            "load: deserializing profile \(uuidString) schema=\(schemaName) stateBytes=\(stateData.count) bindings=\(entry.restoredBindings.map(\.deviceID))"
-          )
-          try await profile.deserializeState(jsonObject)
-          logger.debug(
-            "load: deserialized profile \(uuidString) schema=\(schemaName) profileONo=\(profile.objectNumber) proxyBlockONo=\(profile.proxyBlock?.objectNumber ?? OcaInvalidONo)"
-          )
-        } catch {
-          logger.warning("load: failed to deserialize state for profile \(uuidString): \(error)")
         }
         logger.trace("Loaded profile \(uuidString) for schema \(schemaName)")
       }

@@ -686,12 +686,50 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     connection: Ocp1Connection,
     schema: OcaProfileObjectSchema
   ) async throws {
-    try await _forEachBinding(
-      deviceIdentifier: deviceIdentifier,
-      deviceIndex: deviceIndex,
-      connection: connection,
-      schema: schema
-    ) { binding, remoteObject in
+    // Flatten the schema tree so we can resolve remote objects concurrently.
+    var entries = [OcaProfileObjectSchema]()
+    schema.applyRecursive { objectSchema, _, _ in
+      entries.append(objectSchema)
+    }
+
+    // Resolve all remote objects in parallel. Each task returns the local
+    // binding together with the resolved remote object, or nil if the remote
+    // object does not exist or has no local binding.
+    let resolvedBindings = try await withThrowingTaskGroup(
+      of: (any OcaObjectBindingRepresentable, SwiftOCA.OcaRoot)?.self
+    ) { group in
+      for entry in entries {
+        let remoteONo = try entry.remoteObjectNumber.objectNumber(for: deviceIndex)
+
+        guard let localONo = try objectNumber(for: entry.localObjectNumber),
+              let binding = objectBinding(for: localONo)
+        else {
+          continue
+        }
+
+        group.addTask {
+          let remoteObject: SwiftOCA.OcaRoot
+          do {
+            remoteObject = try await connection.resolve(objectOfUnknownClass: remoteONo)
+          } catch let error as Ocp1Error where error == .status(.badONo) {
+            return nil
+          }
+          return (binding, remoteObject)
+        }
+      }
+
+      var results = [(any OcaObjectBindingRepresentable, SwiftOCA.OcaRoot)]()
+      for try await result in group {
+        if let result {
+          results.append(result)
+        }
+      }
+      return results
+    }
+
+    // Bind each resolved pair. These are @OcaDevice-isolated operations that
+    // also perform network I/O (copying properties, setting up subscriptions).
+    for (binding, remoteObject) in resolvedBindings {
       try await binding.bind(remoteObject: remoteObject, from: deviceIdentifier)
     }
   }

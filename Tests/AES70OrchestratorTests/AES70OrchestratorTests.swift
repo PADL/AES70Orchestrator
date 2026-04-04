@@ -275,8 +275,20 @@ struct OcaDeviceSchemaTests {
     )
     #expect(deviceSchema.name == "TestDevice")
     #expect(deviceSchema.models == nil)
+    #expect(deviceSchema.paramSetInitialSync == false)
     #expect(deviceSchema.profileSchemas.count == 1)
     #expect(deviceSchema.profileSchemas[0].name == "gain")
+  }
+
+  @Test
+  func paramSetInitialSyncFlag() {
+    let profileSchema = OcaProfileSchema(name: "gain", blocks: [])
+    let deviceSchema = OcaDeviceSchema(
+      name: "TestDevice",
+      paramSetInitialSync: true,
+      profileSchemas: [profileSchema]
+    )
+    #expect(deviceSchema.paramSetInitialSync == true)
   }
 }
 
@@ -353,6 +365,39 @@ struct YAMLPropertyFilterTests {
     #expect(gain.excludeProperties == Set([OcaPropertyID("1.6")]))
     #expect(gain.shouldForwardProperty(OcaPropertyID("4.1")))
     #expect(!gain.shouldForwardProperty(OcaPropertyID("1.6")))
+  }
+
+  @Test
+  func paramSetInitialSyncParsedFromYAML() async throws {
+    let yaml = """
+    device:
+      name: Test
+      param-set-initial-sync: true
+      profiles:
+        - TestProfile:
+          - Gain:
+              class-id: \(SwiftOCADevice.OcaGain.classID)
+              class-version: \(SwiftOCADevice.OcaGain.classVersion)
+              match: 0x00000200/0x00000000
+    """
+    let schema = try await _parseYAML(yaml)
+    #expect(schema.paramSetInitialSync == true)
+  }
+
+  @Test
+  func paramSetInitialSyncDefaultsFalse() async throws {
+    let yaml = """
+    device:
+      name: Test
+      profiles:
+        - TestProfile:
+          - Gain:
+              class-id: \(SwiftOCADevice.OcaGain.classID)
+              class-version: \(SwiftOCADevice.OcaGain.classVersion)
+              match: 0x00000200/0x00000000
+    """
+    let schema = try await _parseYAML(yaml)
+    #expect(schema.paramSetInitialSync == false)
   }
 
   @Test
@@ -2519,6 +2564,200 @@ struct EndToEndTests {
     #expect(await profile.remoteObjectCount(for: deviceIdentifier) == 3)
     #expect(await remoteGroup.members.map(\.objectNumber) == [remoteGain1.objectNumber])
     #expect(await remoteScalar.target == OcaInvalidONo)
+
+    _ = remoteDevice
+  }
+
+  // MARK: - param-set initial sync
+
+  private static let remoteParamSetBlockONo: OcaONo = 0x100
+  private static let remoteParamSetGainONo: OcaONo = 0x200
+  private static let localParamSetBlockMask = OcaONoMask(oNo: 0x1000, mask: 0xF0)
+  private static let localParamSetGainMask = OcaONoMask(oNo: 0x2000, mask: 0xF0)
+
+  static func _makeParamSetSchema(modelGUID: OcaModelGUID) -> OcaDeviceSchema {
+    let gainSchema = OcaProfileObjectSchema(
+      role: "Gain",
+      type: SwiftOCADevice.OcaGain.self,
+      localObjectNumber: localParamSetGainMask,
+      remoteObjectNumber: OcaONoMask(oNo: remoteParamSetGainONo, mask: 0)
+    )
+    let blockSchema = OcaProfileObjectSchema(
+      role: "Block",
+      declaredClassID: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>.classID,
+      declaredClassVersion: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>.classVersion,
+      type: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>.self,
+      localObjectNumber: localParamSetBlockMask,
+      remoteObjectNumber: OcaONoMask(oNo: remoteParamSetBlockONo, mask: 0),
+      actionObjectSchema: [gainSchema]
+    )
+    return OcaDeviceSchema(
+      name: "ParamSetDevice",
+      models: [modelGUID],
+      paramSetInitialSync: true,
+      profileSchemas: [OcaProfileSchema(name: "ParamSetGain", blocks: [blockSchema])]
+    )
+  }
+
+  static func _makeParamSetRemoteDevice(
+    port: UInt16,
+    serialNumber: String,
+    modelGUID: OcaModelGUID
+  ) async throws -> (
+    device: OcaDevice,
+    block: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>,
+    gain: SwiftOCADevice.OcaGain,
+    endpointTask: Task<(), Error>
+  ) {
+    let device = OcaDevice()
+    try await device.initializeDefaultObjects()
+    let deviceManager = await device.deviceManager!
+    await _setDeviceManagerProperties(
+      deviceManager,
+      name: "E2E ParamSet Remote Device",
+      serialNumber: serialNumber,
+      modelGUID: modelGUID
+    )
+
+    let block = try await SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>(
+      objectNumber: remoteParamSetBlockONo,
+      role: "Block",
+      deviceDelegate: device,
+      addToRootBlock: true
+    )
+    let gain = try await SwiftOCADevice.OcaGain(
+      objectNumber: remoteParamSetGainONo,
+      role: "Gain",
+      deviceDelegate: device,
+      addToRootBlock: false
+    )
+    try await block.add(actionObject: gain)
+
+    let controlNetwork = try await SwiftOCADevice.OcaControlNetwork(deviceDelegate: device)
+    await _setControlNetworkRunning(controlNetwork)
+
+    var listenAddress = sockaddr_in()
+    listenAddress.sin_family = sa_family_t(AF_INET)
+    listenAddress.sin_addr.s_addr = UInt32(INADDR_LOOPBACK).bigEndian
+    listenAddress.sin_port = port.bigEndian
+    #if canImport(Darwin) || os(FreeBSD) || os(OpenBSD)
+    listenAddress.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+    #endif
+
+    let endpoint = try await Ocp1DeviceEndpoint(
+      address: listenAddress.socketAddressData,
+      device: device
+    )
+
+    let endpointTask = Task {
+      try await endpoint.run()
+    }
+    try await Task.sleep(for: .milliseconds(500))
+
+    return (device, block, gain, endpointTask)
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func paramSetInitialSyncCopiesLocalToRemote() async throws {
+    let port: UInt16 = 12351
+    let serialNumber = "E2EParamSet-\(UUID().uuidString)"
+    let modelGUID = Self._randomModelGUID()
+    let (remoteDevice, _remoteBlock, remoteGain, endpointTask) =
+      try await Self._makeParamSetRemoteDevice(
+        port: port,
+        serialNumber: serialNumber,
+        modelGUID: modelGUID
+      )
+    defer { endpointTask.cancel() }
+
+    let localDevice = OcaDevice()
+    try await localDevice.initializeDefaultObjects()
+    let connectionOptions = Ocp1ConnectionOptions(
+      flags: [.automaticReconnect, .refreshDeviceTreeOnConnection]
+    )
+    let broker = await OcaConnectionBroker(
+      connectionOptions: connectionOptions,
+      serviceTypes: [],
+      deviceModels: nil
+    )
+    let schema = Self._makeParamSetSchema(modelGUID: modelGUID)
+    let coordinator = try await OcaCoordinator(
+      connectionBroker: broker,
+      deviceSchema: schema,
+      deviceDelegate: localDevice
+    )
+
+    let zeroUUID = UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+    let profileONo = try await coordinator.addProfile(schema: "ParamSetGain", uuid: zeroUUID)
+    let profile = try await coordinator._findProfile(oNo: profileONo)
+
+    // set local proxy gain to a known value before connecting
+    let localGainONo = try Self.localParamSetGainMask.objectNumber(for: 1)
+    let localGain: SwiftOCADevice.OcaGain = await localDevice.resolve(
+      objectNumber: localGainONo
+    )!
+    let testValue: OcaDB = -12.5
+    await { @OcaDevice in localGain.gain.value = testValue }()
+
+    // connect to the remote device
+    let deviceIdentifier = OcaConnectionBroker.DeviceIdentifier(
+      serviceType: .tcp,
+      modelGUID: modelGUID,
+      serialNumber: serialNumber,
+      name: "E2E ParamSet Remote Device"
+    )
+    var remoteAddress = sockaddr_in()
+    remoteAddress.sin_family = sa_family_t(AF_INET)
+    remoteAddress.sin_addr.s_addr = UInt32(INADDR_LOOPBACK).bigEndian
+    remoteAddress.sin_port = port.bigEndian
+    #if canImport(Darwin) || os(FreeBSD) || os(OpenBSD)
+    remoteAddress.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+    #endif
+    let connection = try await Ocp1TCPConnection(
+      deviceAddress: remoteAddress.socketAddressData,
+      options: connectionOptions
+    )
+    try await connection.connect()
+    defer { Task { try? await connection.disconnect() } }
+
+    await broker.register(device: deviceIdentifier, connection: connection)
+    let brokerEventTask = Task { [weak coordinator] in
+      guard let coordinator else { return }
+      for await event in await broker.events {
+        await coordinator.handleConnectionBrokerEvent(event)
+      }
+    }
+    defer { brokerEventTask.cancel() }
+
+    // wait for activation
+    for _ in 0..<20 {
+      let count = await profile.remoteObjectCount(for: deviceIdentifier)
+      if count > 0 { break }
+      try await Task.sleep(for: .milliseconds(250))
+    }
+
+    // allow time for param-set apply to complete
+    try await Task.sleep(for: .seconds(2))
+
+    // remote gain should have been updated via param-set blob
+    let remoteValue = await remoteGain.gain.value
+    #expect(
+      remoteValue == testValue,
+      "remote device gain should have been updated to \(testValue) via param-set initial sync, got \(remoteValue)"
+    )
+
+    // local proxy should retain its value
+    let localValue = await localGain.gain.value
+    #expect(localValue == testValue)
+
+    // verify ongoing sync still works after param-set initial sync
+    let liveTestValue: OcaDB = -3.0
+    await { @OcaDevice in localGain.gain.value = liveTestValue }()
+    try await Task.sleep(for: .seconds(2))
+    #expect(
+      await remoteGain.gain.value == liveTestValue,
+      "live property sync should still work after param-set initial sync"
+    )
 
     _ = remoteDevice
   }

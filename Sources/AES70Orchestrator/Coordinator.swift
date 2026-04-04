@@ -356,6 +356,10 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
 
   public func onControllerExpiry(_ controller: any SwiftOCADevice.OcaController) async {}
 
+  var paramSetInitialSync: Bool {
+    deviceSchema.paramSetInitialSync
+  }
+
   func profileSchema(named name: String) throws -> OcaProfileSchema {
     guard let schema = deviceSchema.profileSchemas.first(where: { $0.name == name }) else {
       throw OcaCoordinatorError.profileSchemaNotFound

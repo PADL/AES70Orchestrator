@@ -27,6 +27,7 @@ let package = Package(
       .package(url: "https://github.com/jpsim/Yams", from: "6.2.1"),
       .package(url: "https://github.com/weichsel/ZIPFoundation", from: "0.9.0"),
       .package(url: "https://github.com/apple/swift-async-algorithms", from: "1.0.0"),
+      .package(url: "https://github.com/1024jp/GzipSwift", from: "6.1.0"),
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
@@ -40,6 +41,7 @@ let package = Package(
               .product(name: "SwiftOCADevice", package: "SwiftOCA"),
               .product(name: "Logging", package: "swift-log"),
               .product(name: "ZIPFoundation", package: "ZIPFoundation"),
+              .product(name: "Gzip", package: "GzipSwift"),
               ],
       swiftSettings: [
         .enableExperimentalFeature("StrictConcurrency"),

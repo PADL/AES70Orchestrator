@@ -46,6 +46,12 @@ extension OcaDeviceSchema {
       return try OcaModelGUID(hexString)
     }
 
+    let paramSetInitialSync =
+      Self._node(
+        in: device.mapping,
+        keys: ["param-set-initial-sync", "paramSetInitialSync"]
+      )?.bool ?? false
+
     guard let profileNodes = device.mapping?["profiles"]?.sequence else {
       throw OcaCoordinatorError.schemaParseError("missing profiles array")
     }
@@ -55,7 +61,12 @@ extension OcaDeviceSchema {
       try profileSchemas.append(Self._parseProfileSchema(node))
     }
 
-    self.init(name: name, models: models, profileSchemas: profileSchemas)
+    self.init(
+      name: name,
+      models: models,
+      paramSetInitialSync: paramSetInitialSync,
+      profileSchemas: profileSchemas
+    )
   }
 
   private static func _parseHexString(_ node: Node) throws -> String {

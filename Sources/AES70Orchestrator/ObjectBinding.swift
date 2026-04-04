@@ -39,7 +39,8 @@ protocol OcaObjectBindingRepresentable: Sendable {
   )
   func bind(
     remoteObject: SwiftOCA.OcaRoot,
-    from remoteDevice: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
+    from remoteDevice: SwiftOCA.OcaConnectionBroker.DeviceIdentifier,
+    skipCopy: Bool
   ) async throws
   func subscribe(
     to remoteDevice: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
@@ -395,16 +396,19 @@ public final class OcaObjectBinding<
 
   public func bind(
     remoteObject: SwiftOCA.OcaRoot,
-    from remoteDevice: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
+    from remoteDevice: SwiftOCA.OcaConnectionBroker.DeviceIdentifier,
+    skipCopy: Bool = false
   ) async throws {
     guard let remoteObject = remoteObject as? Remote else {
       throw Ocp1Error.status(.parameterError)
     }
     remoteObjects[remoteDevice] = remoteObject
     profile?.coordinator?.logger.trace(
-      "bind: local object \(localObject.objectNumber) bound to remote object \(remoteObject.objectNumber) on \(remoteDevice)"
+      "bind: local object \(localObject.objectNumber) bound to remote object \(remoteObject.objectNumber) on \(remoteDevice)\(skipCopy ? " (param-set sync)" : "")"
     )
-    try await _copyProperties(to: remoteObject, remoteDevice: remoteDevice)
+    if !skipCopy {
+      try await _copyProperties(to: remoteObject, remoteDevice: remoteDevice)
+    }
 
     if lockRemote {
       try? await remoteObject.setLockNoReadWrite()

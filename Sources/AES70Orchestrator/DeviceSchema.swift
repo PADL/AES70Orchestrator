@@ -23,6 +23,13 @@ public struct OcaDeviceSchema: Sendable, CustomStringConvertible {
 
   public let models: [OcaModelGUID]?
 
+  /// When enabled, initial property synchronization at bind time uses the
+  /// SwiftOCADevice parameter-dataset serialization format (a gzip'd JSON blob)
+  /// instead of copying properties individually. This is faster but assumes the
+  /// remote device uses the same SwiftOCA implementation; the param-set format
+  /// is implementation-dependent.
+  public let paramSetInitialSync: Bool
+
   public let profileSchemas: [OcaProfileSchema]
 
   public var description: String {
@@ -32,10 +39,12 @@ public struct OcaDeviceSchema: Sendable, CustomStringConvertible {
   public init(
     name: String,
     models: [OcaModelGUID]? = nil,
+    paramSetInitialSync: Bool = false,
     profileSchemas: [OcaProfileSchema]
   ) {
     self.name = name
     self.models = models
+    self.paramSetInitialSync = paramSetInitialSync
     self.profileSchemas = profileSchemas
   }
 }

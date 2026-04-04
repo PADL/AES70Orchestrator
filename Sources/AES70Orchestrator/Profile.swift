@@ -735,6 +735,62 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     }
   }
 
+  /// Recursively reorder the `"3.2"` (action objects) arrays in a serialized
+  /// JSON block tree to match the schema's `actionObjectSchema` ordering.
+  /// This ensures the remote device deserializes objects in schema-defined
+  /// order, which matters when earlier objects have side effects on later ones
+  /// (e.g. VCA group assignments resetting channel mute states).
+  private static func _reorderActionObjects(
+    in jsonObject: inout [String: any Sendable],
+    schema: OcaProfileObjectSchema,
+    deviceIndex: OcaONo,
+    localToRemoteONo: [OcaONo: OcaONo],
+    objectNumberForLocal: (OcaONoMask) throws -> OcaONo?
+  ) rethrows {
+    guard var actionArray = jsonObject["3.2"] as? [[String: any Sendable]],
+          !schema.actionObjectSchema.isEmpty
+    else { return }
+
+    // build an ordering: remote ONo → position in schema
+    var orderByRemoteONo = [OcaONo: Int]()
+    for (index, childSchema) in schema.actionObjectSchema.enumerated() {
+      guard let localONoMask = childSchema.localObjectNumber else { continue }
+      if let localONo = try objectNumberForLocal(localONoMask) {
+        if let remoteONo = localToRemoteONo[localONo] {
+          orderByRemoteONo[remoteONo] = index
+        }
+      }
+    }
+
+    // sort the action array by schema position (unknown objects go to the end)
+    let sentinel = schema.actionObjectSchema.count
+    actionArray.sort { a, b in
+      let oNoA = a["_oNo"] as? OcaONo ?? 0
+      let oNoB = b["_oNo"] as? OcaONo ?? 0
+      return (orderByRemoteONo[oNoA] ?? sentinel) < (orderByRemoteONo[oNoB] ?? sentinel)
+    }
+
+    // recurse into child blocks
+    for i in actionArray.indices {
+      let childONo = actionArray[i]["_oNo"] as? OcaONo ?? 0
+      if let childSchema = schema.actionObjectSchema.first(where: { childSchema in
+        guard let mask = childSchema.localObjectNumber else { return false }
+        return (try? objectNumberForLocal(mask))
+          .flatMap { localToRemoteONo[$0] } == childONo
+      }), childSchema.isContainer {
+        try _reorderActionObjects(
+          in: &actionArray[i],
+          schema: childSchema,
+          deviceIndex: deviceIndex,
+          localToRemoteONo: localToRemoteONo,
+          objectNumberForLocal: objectNumberForLocal
+        )
+      }
+    }
+
+    jsonObject["3.2"] = actionArray
+  }
+
   /// Recursively remap all `_oNo` values in a JSON object tree using the provided transform.
   private static func _remapObjectNumbers(
     in jsonObject: Any,
@@ -837,6 +893,16 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     jsonObject = Self._remapObjectNumbers(in: jsonObject) { oNo in
       localToRemoteONo[oNo] ?? oNo
     } as! [String: any Sendable]
+
+    // reorder action objects to match schema order so that objects with
+    // side effects (e.g. VCA assignments) are applied before dependent objects
+    try Self._reorderActionObjects(
+      in: &jsonObject,
+      schema: schema,
+      deviceIndex: deviceIndex,
+      localToRemoteONo: localToRemoteONo,
+      objectNumberForLocal: { try objectNumber(for: $0) }
+    )
 
     // add parameter-dataset metadata expected by the remote device
     jsonObject["_version"] = OcaUint32(1)

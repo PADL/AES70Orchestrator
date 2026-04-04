@@ -743,7 +743,6 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
   private static func _reorderActionObjects(
     in jsonObject: inout [String: any Sendable],
     schema: OcaProfileObjectSchema,
-    deviceIndex: OcaONo,
     localToRemoteONo: [OcaONo: OcaONo],
     objectNumberForLocal: (OcaONoMask) throws -> OcaONo?
   ) rethrows {
@@ -781,7 +780,6 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
         try _reorderActionObjects(
           in: &actionArray[i],
           schema: childSchema,
-          deviceIndex: deviceIndex,
           localToRemoteONo: localToRemoteONo,
           objectNumberForLocal: objectNumberForLocal
         )
@@ -834,15 +832,22 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
   ) throws -> OcaLongBlob {
     guard let proxyBlock else { throw Ocp1Error.status(.deviceError) }
 
-    // build local ONo → remote ONo map and local ONo → schema map
+    // build local ONo → remote ONo map from ALL blocks in the profile schema
+    // so that cross-block reference properties (e.g. VCA group members pointing
+    // to HP channel objects) are correctly remapped
     var localToRemoteONoVar = [OcaONo: OcaONo]()
     var schemaByLocalONoVar = [OcaONo: OcaProfileObjectSchema]()
 
-    try schema.applyRecursive { objectSchema, _, _ in
-      guard let localONo = try objectNumber(for: objectSchema.localObjectNumber) else { return }
-      let remoteONo = try objectSchema.remoteObjectNumber.objectNumber(for: deviceIndex)
-      localToRemoteONoVar[localONo] = remoteONo
-      schemaByLocalONoVar[localONo] = objectSchema
+    let allBlocks = (try? profileSchema.blocks) ?? [schema]
+    for block in allBlocks {
+      try block.applyRecursive { objectSchema, _, _ in
+        guard let localONo = try objectNumber(for: objectSchema.localObjectNumber) else { return }
+        let remoteONo = try objectSchema.remoteObjectNumber.objectNumber(for: deviceIndex)
+        localToRemoteONoVar[localONo] = remoteONo
+        if block.role == schema.role {
+          schemaByLocalONoVar[localONo] = objectSchema
+        }
+      }
     }
 
     let localToRemoteONo = localToRemoteONoVar
@@ -890,16 +895,18 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     var jsonObject = try localBlock.serialize(flags: [.ignoreEncodingErrors], filter: filter)
 
     // remap _oNo values from local to remote space
-    jsonObject = Self._remapObjectNumbers(in: jsonObject) { oNo in
+    guard let remapped = Self._remapObjectNumbers(in: jsonObject, transform: { oNo in
       localToRemoteONo[oNo] ?? oNo
-    } as! [String: any Sendable]
+    }) as? [String: any Sendable] else {
+      throw Ocp1Error.status(.deviceError)
+    }
+    jsonObject = remapped
 
     // reorder action objects to match schema order so that objects with
     // side effects (e.g. VCA assignments) are applied before dependent objects
     try Self._reorderActionObjects(
       in: &jsonObject,
       schema: schema,
-      deviceIndex: deviceIndex,
       localToRemoteONo: localToRemoteONo,
       objectNumberForLocal: { try objectNumber(for: $0) }
     )
@@ -972,9 +979,11 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
           deviceIdentifier: deviceIdentifier
         )
         let remoteONo = try schema.remoteObjectNumber.objectNumber(for: deviceIndex)
-        let remoteBlock = try await connection.resolve(
+        guard let remoteBlock = try await connection.resolve(
           objectOfUnknownClass: remoteONo
-        ) as! SwiftOCA.OcaBlock
+        ) as? SwiftOCA.OcaBlock else {
+          throw Ocp1Error.status(.parameterError)
+        }
         coordinator?.logger.debug(
           "bindRemoteObjects: applying param-set blob (\(Data(blob).count) bytes) to remote block \(remoteONo) on \(deviceIdentifier)"
         )

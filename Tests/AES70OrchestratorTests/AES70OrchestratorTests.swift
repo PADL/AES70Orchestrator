@@ -2269,7 +2269,7 @@ struct EndToEndTests {
       name: "E2E Reference Remote Device"
     )
     try await { @OcaDevice in
-      try coordinator.bindProfile(
+      try await coordinator.bindProfile(
         profile,
         to: deviceIdentifier,
         deviceIndex: Self.referenceDeviceIndex
@@ -2381,7 +2381,7 @@ struct EndToEndTests {
       name: "E2E Reference Remote Device Missing Gain 2"
     )
     try await { @OcaDevice in
-      try coordinator.bindProfile(
+      try await coordinator.bindProfile(
         profile,
         to: deviceIdentifier,
         deviceIndex: Self.referenceDeviceIndex

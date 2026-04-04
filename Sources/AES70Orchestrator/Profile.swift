@@ -273,10 +273,9 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     return try oNoMask.objectNumber(for: profileIndex)
   }
 
-  /// Build local↔remote ONo maps filtered to objects whose remote ONo matches `targetMatch`.
-  /// In practice all local ONos within a profile are unique, so the filter is defensive —
-  /// the dictionary lookup alone would resolve correctly. But filtering by `targetMatch`
-  /// ensures we never accidentally remap an ONo that belongs to a different target family.
+  /// Build local↔remote ONo maps filtered to objects whose remote ONo shares the
+  /// same mask region as `targetMatch`. This ensures we only remap ONos that belong
+  /// to the same remote address space as the reference property's target.
   private func _referenceMaps(
     deviceIndex: OcaONo,
     targetMatch: OcaONoMask
@@ -293,9 +292,9 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
           return
         }
 
-        // only include objects whose remote ONo base matches the target family
+        // only include objects whose remote ONo shares the same mask region
         let remoteBase = objectSchema.remoteObjectNumber.oNo
-        if remoteBase & ~targetMatch.mask != targetMatch.oNo & ~targetMatch.mask {
+        if remoteBase & targetMatch.mask != targetMatch.oNo & targetMatch.mask {
           return
         }
 
@@ -782,10 +781,15 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
       return results
     }
 
-    // Bind each resolved pair. These are @OcaDevice-isolated operations that
-    // also perform network I/O (copying properties, setting up subscriptions).
+    // Phase 1: copy properties to all remote objects before subscribing,
+    // so that no subscription events can overwrite local proxy state.
     for (binding, remoteObject) in resolvedBindings {
       try await binding.bind(remoteObject: remoteObject, from: deviceIdentifier)
+    }
+
+    // Phase 2: subscribe to remote events now that all properties are pushed.
+    for (binding, _) in resolvedBindings {
+      try await binding.subscribe(to: deviceIdentifier)
     }
   }
 

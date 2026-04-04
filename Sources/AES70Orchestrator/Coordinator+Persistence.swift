@@ -143,7 +143,7 @@ extension OcaCoordinator {
             logger.warning("load: invalid device identifier \(binding.deviceID)")
             continue
           }
-          try bindProfile(profile, to: deviceIdentifier, deviceIndex: binding.deviceIndex)
+          try await bindProfile(profile, to: deviceIdentifier, deviceIndex: binding.deviceIndex)
         }
 
         // restore profile state with ONo remapping

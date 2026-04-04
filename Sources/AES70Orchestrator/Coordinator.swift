@@ -466,11 +466,16 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
     _ profile: OcaProfile,
     to deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier,
     deviceIndex: OcaONo? = nil
-  ) throws {
+  ) async throws {
     guard !profile.isAutomaticallyBound else {
       throw OcaCoordinatorError.profileAutomaticallyBound
     }
     try _bindProfile(profile, to: deviceIdentifier, deviceIndex: deviceIndex)
+    // Activate immediately if the device is already connected, so that the
+    // caller can use the proxy objects without polling.
+    if profile.remoteObjectCount(for: deviceIdentifier) == 0 {
+      await _activateProfile(profile, to: deviceIdentifier)
+    }
   }
 
   private func _unbindProfile(
@@ -646,7 +651,7 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
       else {
         throw Ocp1Error.status(.parameterError)
       }
-      try bindProfile(
+      try await bindProfile(
         _findProfile(oNo: params.profileONo),
         to: deviceIdentifier,
         deviceIndex: params.deviceIndex ==

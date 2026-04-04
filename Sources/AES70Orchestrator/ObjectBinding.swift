@@ -337,9 +337,9 @@ public final class OcaObjectBinding<
       return
     }
 
-    if remoteFollowerOnly {
+    if remoteFollowerOnly || profile?.activatingDevices.contains(origin) == true {
       profile?.coordinator?.logger.trace(
-        "handleRemoteEvent: ignoring propertyID \(localEventData.propertyID) from \(origin) for remote-follower-only object \(localObject.objectNumber)"
+        "handleRemoteEvent: ignoring propertyID \(localEventData.propertyID) from \(origin) for \(remoteFollowerOnly ? "remote-follower-only" : "activating") object \(localObject.objectNumber)"
       )
       return
     }

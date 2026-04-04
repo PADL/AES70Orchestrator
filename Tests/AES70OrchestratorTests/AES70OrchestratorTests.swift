@@ -2037,6 +2037,106 @@ struct EndToEndTests {
   }
 
   @Test(.timeLimit(.minutes(1)))
+  func activationPreservesLocalProxyState() async throws {
+    let port: UInt16 = 12350
+    let serialNumber = "E2ETest-Activation-\(UUID().uuidString)"
+    let modelGUID = Self._randomModelGUID()
+
+    // start remote device with a gain of -20 dB
+    let (remoteDevice, remoteGain, endpointTask) = try await Self._makeRemoteDevice(
+      port: port,
+      serialNumber: serialNumber,
+      modelGUID: modelGUID
+    )
+    defer { endpointTask.cancel() }
+    let remoteInitialValue: OcaDB = -20.0
+    await { @OcaDevice in remoteGain.gain.value = remoteInitialValue }()
+
+    // build coordinator and profile WITHOUT connecting yet
+    let localDevice = OcaDevice()
+    try await localDevice.initializeDefaultObjects()
+    let connectionOptions = Ocp1ConnectionOptions(
+      flags: [.automaticReconnect, .refreshDeviceTreeOnConnection]
+    )
+    let broker = await OcaConnectionBroker(
+      connectionOptions: connectionOptions,
+      serviceTypes: [],
+      deviceModels: nil
+    )
+    let schema = Self._makeSchema(modelGUID: modelGUID)
+    let coordinator = try await OcaCoordinator(
+      connectionBroker: broker,
+      deviceSchema: schema,
+      deviceDelegate: localDevice
+    )
+
+    let zeroUUID = UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+    let profileONo = try await coordinator.addProfile(schema: "E2EGain", uuid: zeroUUID)
+    let profile = try await coordinator._findProfile(oNo: profileONo)
+
+    // set local proxy gain to -7 dB (different from remote)
+    let localInitialValue: OcaDB = -7.0
+    let localGain: SwiftOCADevice.OcaGain = await localDevice.resolve(
+      objectNumber: Self.localGainONo
+    )!
+    await { @OcaDevice in localGain.gain.value = localInitialValue }()
+
+    // now connect — this triggers auto-bind + activation
+    let deviceIdentifier = OcaConnectionBroker.DeviceIdentifier(
+      serviceType: .tcp,
+      modelGUID: modelGUID,
+      serialNumber: serialNumber,
+      name: "E2E Test Remote Device"
+    )
+    var remoteAddress = sockaddr_in()
+    remoteAddress.sin_family = sa_family_t(AF_INET)
+    remoteAddress.sin_addr.s_addr = UInt32(INADDR_LOOPBACK).bigEndian
+    remoteAddress.sin_port = port.bigEndian
+    #if canImport(Darwin) || os(FreeBSD) || os(OpenBSD)
+    remoteAddress.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+    #endif
+    let connection = try await Ocp1TCPConnection(
+      deviceAddress: remoteAddress.socketAddressData,
+      options: connectionOptions
+    )
+    try await connection.connect()
+    await broker.register(device: deviceIdentifier, connection: connection)
+    let brokerEventTask = Task { [weak coordinator] in
+      guard let coordinator else { return }
+      for await event in await broker.events {
+        await coordinator.handleConnectionBrokerEvent(event)
+      }
+    }
+    _ = brokerEventTask
+
+    // wait for activation
+    for _ in 0..<20 {
+      let count = await profile.remoteObjectCount(for: deviceIdentifier)
+      if count > 0 { break }
+      try await Task.sleep(for: .milliseconds(250))
+    }
+
+    // allow time for any stray remote events to propagate
+    try await Task.sleep(for: .seconds(2))
+
+    // local proxy must retain its pre-activation value
+    let localValue = await localGain.gain.value
+    #expect(
+      localValue == localInitialValue,
+      "local proxy gain should be preserved during activation, not overwritten by remote device state"
+    )
+
+    // remote device should have been updated to match the local proxy
+    let remoteValue = await remoteGain.gain.value
+    #expect(
+      remoteValue == localInitialValue,
+      "remote device gain should have been updated to match local proxy"
+    )
+
+    _ = remoteDevice
+  }
+
+  @Test(.timeLimit(.minutes(1)))
   func localChangePropagatesToRemote() async throws {
     let port: UInt16 = 12345
     let serialNumber = "E2ETest-\(UUID().uuidString)"

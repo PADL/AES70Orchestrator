@@ -249,6 +249,9 @@ public final class OcaObjectBinding<
         eventID: OcaPropertyChangedEventID
       )
       let remappedEventData = try _remapEventDataForRemote(eventData, deviceIdentifier: remoteDevice)
+      profile?.coordinator?.logger.trace(
+        "_copyProperties: local \(localObject.objectNumber) -> remote \(remoteObject.objectNumber) propertyID \(propertyID) value=\(Array(encodedValue))"
+      )
       if referenceProperties[propertyID] != nil || propertyID == OcaPropertyID("3.1") {
         if let onos = try? Ocp1Decoder().decode([OcaONo].self, from: remappedEventData.propertyValue) {
           profile?.coordinator?.logger.trace(
@@ -287,7 +290,7 @@ public final class OcaObjectBinding<
     guard _shouldForwardProperty(eventData.propertyID) else { return }
 
     profile?.coordinator?.logger.trace(
-      "handleLocalEvent: forwarding propertyID \(eventData.propertyID) to \(remoteObjects.count) remote object(s)"
+      "handleLocalEvent: forwarding propertyID \(eventData.propertyID) value=\(Array(eventData.propertyValue)) from local \(localObject.objectNumber) to \(remoteObjects.count) remote object(s)"
     )
     for (deviceID, remoteObject) in remoteObjects {
       guard remoteObject.connectionDelegate != nil else {
@@ -348,6 +351,10 @@ public final class OcaObjectBinding<
     defer { _forwardingFromRemote = false }
 
     guard _shouldForwardProperty(localEventData.propertyID) else { return }
+
+    profile?.coordinator?.logger.trace(
+      "handleRemoteEvent: forwarding propertyID \(localEventData.propertyID) value=\(Array(localEventData.propertyValue)) from \(origin) to local \(localObject.objectNumber)"
+    )
 
     // don't forward lockState changes to the local object when lockRemote is set
     if !(lockRemote && localEventData.propertyID == Self._lockStatePropertyID) {

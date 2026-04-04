@@ -213,7 +213,11 @@ public final class OcaObjectBinding<
     let lockStatePropertyID = Self._lockStatePropertyID
     let includeProperties = self.includeProperties
     let excludeProperties = self.excludeProperties
-    _ = try localObject.serialize(flags: [.ignoreEncodingErrors]) { [capturedValues] _, propertyID, value in
+    let localObjectNumber = localObject.objectNumber
+    _ = try localObject.serialize(flags: [.ignoreEncodingErrors]) { [capturedValues] object, propertyID, value in
+      guard object.objectNumber == localObjectNumber else {
+        return .ignore
+      }
       if lockRemote, propertyID == lockStatePropertyID {
         return .ignore
       }

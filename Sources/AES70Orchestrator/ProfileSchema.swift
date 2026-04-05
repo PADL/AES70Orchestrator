@@ -236,14 +236,19 @@ public struct OcaProfileObjectSchema: Sendable, CustomStringConvertible {
     objectNumber: OcaONo? = nil,
     deviceDelegate: OcaDevice?
   ) async throws -> SwiftOCADevice.OcaRoot {
-    let resolvedType =
-      if let declaredClassIdentification {
-        try await OcaDeviceClassRegistry.shared.match(
-          classIdentification: declaredClassIdentification
-        )
-      } else {
-        type
+    var resolvedType = type
+    if let declaredClassIdentification {
+      let matched: SwiftOCADevice.OcaRoot.Type = try await OcaDeviceClassRegistry.shared.match(
+        classIdentification: declaredClassIdentification
+      )
+      // When the registry returns a type with a different classID (i.e. a
+      // custom subclass), use the registry match.  Otherwise prefer the
+      // schema's `type` — it preserves generic parameterization
+      // (e.g. OcaGroup<OcaGain> vs OcaGroup<OcaRoot>).
+      if matched.classID != type.classID {
+        resolvedType = matched
       }
+    }
 
     return try await resolvedType.init(
       objectNumber: objectNumber,

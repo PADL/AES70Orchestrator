@@ -857,7 +857,7 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
   }
 
   /// Remap OcaONo values within a reference property value.
-  nonisolated private static func _remapReferencePropertyValue(
+  private nonisolated static func _remapReferencePropertyValue(
     _ value: Any,
     transform: (OcaONo) -> OcaONo
   ) -> Any {
@@ -980,8 +980,11 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     )
 
     #if DEBUG
-    if let debugData = try? JSONSerialization.data(withJSONObject: jsonObject, options: [.prettyPrinted, .sortedKeys]),
-       let debugString = String(data: debugData, encoding: .utf8)
+    if let debugData = try? JSONSerialization.data(
+      withJSONObject: jsonObject,
+      options: [.prettyPrinted, .sortedKeys]
+    ),
+      let debugString = String(data: debugData, encoding: .utf8)
     {
       coordinator?.logger.trace(
         "bindRemoteObjects: param-set JSON for \(schema.role):\n\(debugString)"

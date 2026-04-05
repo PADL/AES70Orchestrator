@@ -802,7 +802,7 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
 
   /// Build a lookup from class ID string to the set of property ID strings
   /// that are reference properties (i.e. contain OcaONo values requiring remapping).
-  private static func _referencePropertyIDsByClassID(
+  static func _referencePropertyIDsByClassID(
     from schema: OcaProfileSchema
   ) -> [String: Set<String>] {
     var result = [String: Set<String>]()

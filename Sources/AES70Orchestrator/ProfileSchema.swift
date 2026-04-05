@@ -253,7 +253,7 @@ public struct OcaProfileObjectSchema: Sendable, CustomStringConvertible {
     )
   }
 
-  func applyRecursive(
+  public func applyRecursive(
     parentRolePath: [String] = [],
     _ body: (
       _ schema: OcaProfileObjectSchema,
@@ -269,7 +269,7 @@ public struct OcaProfileObjectSchema: Sendable, CustomStringConvertible {
     }
   }
 
-  func applyRecursive(
+  public func applyRecursive(
     parentRolePath: [String] = [],
     _ body: (
       _ schema: OcaProfileObjectSchema,

@@ -425,7 +425,7 @@ public final class OcaObjectBinding<
     }
 
     if lockRemote {
-      try? await remoteObject.setLockNoReadWrite()
+      try? await remoteObject.setLockNoWrite()
     }
   }
 

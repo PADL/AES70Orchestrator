@@ -979,6 +979,16 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
       objectNumberForLocal: { try objectNumber(for: $0) }
     )
 
+    #if DEBUG
+    if let debugData = try? JSONSerialization.data(withJSONObject: jsonObject, options: [.prettyPrinted, .sortedKeys]),
+       let debugString = String(data: debugData, encoding: .utf8)
+    {
+      coordinator?.logger.trace(
+        "bindRemoteObjects: param-set JSON for \(schema.role):\n\(debugString)"
+      )
+    }
+    #endif
+
     // add parameter-dataset metadata expected by the remote device
     jsonObject["_version"] = OcaUint32(1)
     jsonObject["_mimeType"] = OcaParamDatasetMimeType

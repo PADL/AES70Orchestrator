@@ -2768,4 +2768,501 @@ struct EndToEndTests {
 
     _ = remoteDevice
   }
+
+  // MARK: - param-set reference property remapping
+
+  private static let remoteParamSetGroupBlockONo: OcaONo = 0x400
+  private static let remoteParamSetGroupONo: OcaONo = 0x500
+  private static let remoteParamSetGroupGain1ONo: OcaONo = 0x600
+  private static let remoteParamSetGroupGain2ONo: OcaONo = 0x700
+  private static let localParamSetGroupBlockMask = OcaONoMask(oNo: 0x4000, mask: 0xF0)
+  private static let localParamSetGroupMask = OcaONoMask(oNo: 0x5000, mask: 0xF0)
+  private static let localParamSetGroupGain1Mask = OcaONoMask(oNo: 0x6000, mask: 0xF0)
+  private static let localParamSetGroupGain2Mask = OcaONoMask(oNo: 0x7000, mask: 0xF0)
+
+  static func _makeParamSetGroupSchema(modelGUID: OcaModelGUID) -> OcaDeviceSchema {
+    let gain1Schema = OcaProfileObjectSchema(
+      role: "Gain 1",
+      type: SwiftOCADevice.OcaGain.self,
+      localObjectNumber: localParamSetGroupGain1Mask,
+      remoteObjectNumber: OcaONoMask(oNo: remoteParamSetGroupGain1ONo, mask: 0)
+    )
+    let gain2Schema = OcaProfileObjectSchema(
+      role: "Gain 2",
+      type: SwiftOCADevice.OcaGain.self,
+      localObjectNumber: localParamSetGroupGain2Mask,
+      remoteObjectNumber: OcaONoMask(oNo: remoteParamSetGroupGain2ONo, mask: 0)
+    )
+    let groupSchema = OcaProfileObjectSchema(
+      role: "Group",
+      declaredClassID: SwiftOCADevice.OcaGroup<SwiftOCADevice.OcaGain>.classID,
+      declaredClassVersion: SwiftOCADevice.OcaGroup<SwiftOCADevice.OcaGain>.classVersion,
+      type: SwiftOCADevice.OcaGroup<SwiftOCADevice.OcaGain>.self,
+      localObjectNumber: localParamSetGroupMask,
+      remoteObjectNumber: OcaONoMask(oNo: remoteParamSetGroupONo, mask: 0),
+      includeProperties: [OcaPropertyID("3.1")],
+      referenceProperties: [
+        OcaPropertyID("3.1"): OcaProfileReferencePropertySchema(
+          targetMatch: OcaONoMask(oNo: 0x6000, mask: 0xF0)
+        ),
+      ]
+    )
+    let blockSchema = OcaProfileObjectSchema(
+      role: "Block",
+      declaredClassID: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>.classID,
+      declaredClassVersion: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>.classVersion,
+      type: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>.self,
+      localObjectNumber: localParamSetGroupBlockMask,
+      remoteObjectNumber: OcaONoMask(oNo: remoteParamSetGroupBlockONo, mask: 0),
+      actionObjectSchema: [gain1Schema, gain2Schema, groupSchema]
+    )
+    return OcaDeviceSchema(
+      name: "ParamSetGroupDevice",
+      models: [modelGUID],
+      paramSetInitialSync: true,
+      profileSchemas: [OcaProfileSchema(name: "ParamSetGroup", blocks: [blockSchema])]
+    )
+  }
+
+  static func _makeParamSetGroupRemoteDevice(
+    port: UInt16,
+    serialNumber: String,
+    modelGUID: OcaModelGUID
+  ) async throws -> (
+    device: OcaDevice,
+    block: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>,
+    group: SwiftOCADevice.OcaGroup<SwiftOCADevice.OcaGain>,
+    gain1: SwiftOCADevice.OcaGain,
+    gain2: SwiftOCADevice.OcaGain,
+    endpointTask: Task<(), Error>
+  ) {
+    let device = OcaDevice()
+    try await device.initializeDefaultObjects()
+    let deviceManager = await device.deviceManager!
+    await _setDeviceManagerProperties(
+      deviceManager,
+      name: "E2E ParamSet Group Remote Device",
+      serialNumber: serialNumber,
+      modelGUID: modelGUID
+    )
+
+    let block = try await SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>(
+      objectNumber: remoteParamSetGroupBlockONo,
+      role: "Block",
+      deviceDelegate: device,
+      addToRootBlock: true
+    )
+    let gain1 = try await SwiftOCADevice.OcaGain(
+      objectNumber: remoteParamSetGroupGain1ONo,
+      role: "Gain 1",
+      deviceDelegate: device,
+      addToRootBlock: false
+    )
+    let gain2 = try await SwiftOCADevice.OcaGain(
+      objectNumber: remoteParamSetGroupGain2ONo,
+      role: "Gain 2",
+      deviceDelegate: device,
+      addToRootBlock: false
+    )
+    let group = try await SwiftOCADevice.OcaGroup<SwiftOCADevice.OcaGain>(
+      objectNumber: remoteParamSetGroupONo,
+      role: "Group",
+      deviceDelegate: device,
+      addToRootBlock: false
+    )
+    try await block.add(actionObject: gain1)
+    try await block.add(actionObject: gain2)
+    try await block.add(actionObject: group)
+
+    let controlNetwork = try await SwiftOCADevice.OcaControlNetwork(deviceDelegate: device)
+    await _setControlNetworkRunning(controlNetwork)
+
+    var listenAddress = sockaddr_in()
+    listenAddress.sin_family = sa_family_t(AF_INET)
+    listenAddress.sin_addr.s_addr = UInt32(INADDR_LOOPBACK).bigEndian
+    listenAddress.sin_port = port.bigEndian
+    #if canImport(Darwin) || os(FreeBSD) || os(OpenBSD)
+    listenAddress.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+    #endif
+
+    let endpoint = try await Ocp1DeviceEndpoint(
+      address: listenAddress.socketAddressData,
+      device: device
+    )
+
+    let endpointTask = Task {
+      try await endpoint.run()
+    }
+    try await Task.sleep(for: .milliseconds(500))
+
+    return (device, block, group, gain1, gain2, endpointTask)
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func paramSetInitialSyncRemapsGroupMembers() async throws {
+    let port: UInt16 = 12352
+    let serialNumber = "E2EParamSetGroup-\(UUID().uuidString)"
+    let modelGUID = Self._randomModelGUID()
+    let (remoteDevice, _remoteBlock, remoteGroup, _remoteGain1, _remoteGain2, endpointTask) =
+      try await Self._makeParamSetGroupRemoteDevice(
+        port: port,
+        serialNumber: serialNumber,
+        modelGUID: modelGUID
+      )
+    defer { endpointTask.cancel() }
+
+    let localDevice = OcaDevice()
+    try await localDevice.initializeDefaultObjects()
+    let connectionOptions = Ocp1ConnectionOptions(
+      flags: [.automaticReconnect, .refreshDeviceTreeOnConnection]
+    )
+    let broker = await OcaConnectionBroker(
+      connectionOptions: connectionOptions,
+      serviceTypes: [],
+      deviceModels: nil
+    )
+    let schema = Self._makeParamSetGroupSchema(modelGUID: modelGUID)
+    let coordinator = try await OcaCoordinator(
+      connectionBroker: broker,
+      deviceSchema: schema,
+      deviceDelegate: localDevice
+    )
+
+    let zeroUUID = UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+    let profileONo = try await coordinator.addProfile(schema: "ParamSetGroup", uuid: zeroUUID)
+    let profile = try await coordinator._findProfile(oNo: profileONo)
+
+    // resolve local proxy objects
+    let localGroupONo = try Self.localParamSetGroupMask.objectNumber(for: 1)
+    let localGain1ONo = try Self.localParamSetGroupGain1Mask.objectNumber(for: 1)
+    let localGain2ONo = try Self.localParamSetGroupGain2Mask.objectNumber(for: 1)
+
+    let localGroup: SwiftOCADevice.OcaGroup<SwiftOCADevice.OcaGain> = await localDevice.resolve(
+      objectNumber: localGroupONo
+    )!
+    let localGain1: SwiftOCADevice.OcaGain = await localDevice.resolve(
+      objectNumber: localGain1ONo
+    )!
+    let localGain2: SwiftOCADevice.OcaGain = await localDevice.resolve(
+      objectNumber: localGain2ONo
+    )!
+
+    // assign both gains as group members on local proxy
+    try await localGroup.add(member: localGain1)
+    try await localGroup.add(member: localGain2)
+    #expect(localGroup.members.count == 2)
+
+    // connect to the remote device
+    let deviceIdentifier = OcaConnectionBroker.DeviceIdentifier(
+      serviceType: .tcp,
+      modelGUID: modelGUID,
+      serialNumber: serialNumber,
+      name: "E2E ParamSet Group Remote Device"
+    )
+    var remoteAddress = sockaddr_in()
+    remoteAddress.sin_family = sa_family_t(AF_INET)
+    remoteAddress.sin_addr.s_addr = UInt32(INADDR_LOOPBACK).bigEndian
+    remoteAddress.sin_port = port.bigEndian
+    #if canImport(Darwin) || os(FreeBSD) || os(OpenBSD)
+    remoteAddress.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+    #endif
+    let connection = try await Ocp1TCPConnection(
+      deviceAddress: remoteAddress.socketAddressData,
+      options: connectionOptions
+    )
+    try await connection.connect()
+    defer { Task { try? await connection.disconnect() } }
+
+    await broker.register(device: deviceIdentifier, connection: connection)
+    let brokerEventTask = Task { [weak coordinator] in
+      guard let coordinator else { return }
+      for await event in await broker.events {
+        await coordinator.handleConnectionBrokerEvent(event)
+      }
+    }
+    defer { brokerEventTask.cancel() }
+
+    // wait for activation
+    for _ in 0..<20 {
+      let count = await profile.remoteObjectCount(for: deviceIdentifier)
+      if count > 0 { break }
+      try await Task.sleep(for: .milliseconds(250))
+    }
+
+    // allow time for param-set apply to complete
+    try await Task.sleep(for: .seconds(2))
+
+    // verify the param-set path was actually used
+    let syncCount = await profile.paramSetSyncCount
+    #expect(
+      syncCount > 0,
+      "param-set sync path should have been used, but paramSetSyncCount is \(syncCount)"
+    )
+
+    // remote group should have both gains as members with REMOTE ONos
+    let remoteMemberONos = remoteGroup.members.map(\.objectNumber)
+    #expect(
+      remoteMemberONos.contains(Self.remoteParamSetGroupGain1ONo),
+      "remote group should contain gain 1 (ONo \(Self.remoteParamSetGroupGain1ONo)), got \(remoteMemberONos)"
+    )
+    #expect(
+      remoteMemberONos.contains(Self.remoteParamSetGroupGain2ONo),
+      "remote group should contain gain 2 (ONo \(Self.remoteParamSetGroupGain2ONo)), got \(remoteMemberONos)"
+    )
+    #expect(
+      remoteMemberONos.count == 2,
+      "remote group should have exactly 2 members, got \(remoteMemberONos.count)"
+    )
+
+    _ = remoteDevice
+  }
+}
+
+// MARK: - _remapObjectNumbers unit tests
+
+@Suite
+struct RemapObjectNumbersTests {
+  private static let groupClassID = SwiftOCADevice.OcaGroup<SwiftOCADevice.OcaGain>.classID
+
+  @Test
+  func remapsONoKeysWithoutReferenceProperties() async {
+    let jsonObject: [String: Any] = [
+      "_oNo": OcaONo(0x1000),
+      "_classID": "1.1.3",
+      "4.1": OcaONo(42),
+      "3.2": [
+        ["_oNo": OcaONo(0x2000), "_classID": "1.1.1.5", "4.1": OcaFloat32(-12.5)],
+      ] as [[String: Any]],
+    ]
+
+    let result = OcaProfile._remapObjectNumbers(
+      in: jsonObject,
+      transform: { $0 + 0x100 }
+    ) as! [String: Any]
+
+    // _oNo keys are remapped
+    #expect(result["_oNo"] as? OcaONo == 0x1100)
+    let actionObjects = result["3.2"] as! [[String: Any]]
+    #expect(actionObjects[0]["_oNo"] as? OcaONo == 0x2100)
+
+    // non-_oNo integer values are NOT remapped
+    #expect(result["4.1"] as? OcaONo == 42)
+    #expect(actionObjects[0]["4.1"] as? OcaFloat32 == -12.5)
+  }
+
+  @Test
+  func remapsArrayReferenceProperty() {
+    let refProps: [String: Set<String>] = [
+      groupClassID.description: ["3.1"],
+    ]
+
+    let jsonObject: [String: Any] = [
+      "_oNo": OcaONo(0x5000),
+      "_classID": groupClassID.description,
+      "3.1": [OcaONo(0x6000), OcaONo(0x7000)],
+    ]
+
+    let result = OcaProfile._remapObjectNumbers(
+      in: jsonObject,
+      referencePropertyIDs: refProps,
+      transform: { $0 + 0x100 }
+    ) as! [String: Any]
+
+    #expect(result["_oNo"] as? OcaONo == 0x5100)
+    let members = result["3.1"] as! [OcaONo]
+    #expect(members == [0x6100, 0x7100])
+  }
+
+  @Test
+  func remapsScalarReferenceProperty() {
+    let scalarClassID = _ReferenceScalarDeviceObject.classID
+
+    let refProps: [String: Set<String>] = [
+      scalarClassID.description: ["4.1"],
+    ]
+
+    let jsonObject: [String: Any] = [
+      "_oNo": OcaONo(0x4000),
+      "_classID": scalarClassID.description,
+      "4.1": OcaONo(0x6000),
+    ]
+
+    let result = OcaProfile._remapObjectNumbers(
+      in: jsonObject,
+      referencePropertyIDs: refProps,
+      transform: { $0 + 0x100 }
+    ) as! [String: Any]
+
+    #expect(result["_oNo"] as? OcaONo == 0x4100)
+    #expect(result["4.1"] as? OcaONo == 0x6100)
+  }
+
+  @Test
+  func doesNotRemapNonReferenceIntegerProperties() {
+    let refProps: [String: Set<String>] = [
+      groupClassID.description: ["3.1"],
+    ]
+
+    let jsonObject: [String: Any] = [
+      "_oNo": OcaONo(0x5000),
+      "_classID": groupClassID.description,
+      "3.1": [OcaONo(0x6000)],
+      "2.1": OcaONo(0x9999),
+    ]
+
+    let result = OcaProfile._remapObjectNumbers(
+      in: jsonObject,
+      referencePropertyIDs: refProps,
+      transform: { $0 + 0x100 }
+    ) as! [String: Any]
+
+    // reference property remapped
+    let members = result["3.1"] as! [OcaONo]
+    #expect(members == [0x6100])
+
+    // non-reference integer property left untouched
+    #expect(result["2.1"] as? OcaONo == 0x9999)
+  }
+
+  @Test
+  func doesNotRemapWhenClassIDMissing() {
+    let refProps: [String: Set<String>] = [
+      groupClassID.description: ["3.1"],
+    ]
+
+    let jsonObject: [String: Any] = [
+      "_oNo": OcaONo(0x5000),
+      // no _classID — should not remap reference properties
+      "3.1": [OcaONo(0x6000)],
+    ]
+
+    let result = OcaProfile._remapObjectNumbers(
+      in: jsonObject,
+      referencePropertyIDs: refProps,
+      transform: { $0 + 0x100 }
+    ) as! [String: Any]
+
+    #expect(result["_oNo"] as? OcaONo == 0x5100)
+    // without _classID, 3.1 is not recognized as a reference property
+    let members = result["3.1"] as! [OcaONo]
+    #expect(members == [0x6000])
+  }
+
+  @Test
+  func doesNotRemapWhenClassIDDoesNotMatchSchema() {
+    let refProps: [String: Set<String>] = [
+      groupClassID.description: ["3.1"],
+    ]
+
+    let jsonObject: [String: Any] = [
+      "_oNo": OcaONo(0x5000),
+      "_classID": "1.1.1.5",  // OcaGain, not a group
+      "3.1": [OcaONo(0x6000)],
+    ]
+
+    let result = OcaProfile._remapObjectNumbers(
+      in: jsonObject,
+      referencePropertyIDs: refProps,
+      transform: { $0 + 0x100 }
+    ) as! [String: Any]
+
+    #expect(result["_oNo"] as? OcaONo == 0x5100)
+    let members = result["3.1"] as! [OcaONo]
+    #expect(members == [0x6000])
+  }
+
+  @Test
+  func remapsNestedReferenceProperties() {
+    let refProps: [String: Set<String>] = [
+      groupClassID.description: ["3.1"],
+    ]
+
+    let jsonObject: [String: Any] = [
+      "_oNo": OcaONo(0x1000),
+      "_classID": "1.1.3",
+      "3.2": [
+        [
+          "_oNo": OcaONo(0x5000),
+          "_classID": groupClassID.description,
+          "3.1": [OcaONo(0x6000), OcaONo(0x7000)],
+        ] as [String: Any],
+        [
+          "_oNo": OcaONo(0x6000),
+          "_classID": "1.1.1.5",
+          "4.1": OcaFloat32(-6.0),
+        ] as [String: Any],
+      ] as [[String: Any]],
+    ]
+
+    let result = OcaProfile._remapObjectNumbers(
+      in: jsonObject,
+      referencePropertyIDs: refProps,
+      transform: { $0 + 0x100 }
+    ) as! [String: Any]
+
+    let actionObjects = result["3.2"] as! [[String: Any]]
+    let groupObj = actionObjects[0]
+    #expect(groupObj["_oNo"] as? OcaONo == 0x5100)
+    let members = groupObj["3.1"] as! [OcaONo]
+    #expect(members == [0x6100, 0x7100])
+
+    let gainObj = actionObjects[1]
+    #expect(gainObj["_oNo"] as? OcaONo == 0x6100)
+    // gain's float property untouched
+    #expect(gainObj["4.1"] as? OcaFloat32 == -6.0)
+  }
+
+  @Test
+  func referencePropertyIDsByClassIDExtractsFromSchema() {
+    let targetMatch = OcaONoMask(oNo: 0x6000, mask: 0xF0)
+    let groupSchema = OcaProfileObjectSchema(
+      role: "Group",
+      declaredClassID: groupClassID,
+      declaredClassVersion: SwiftOCADevice.OcaGroup<SwiftOCADevice.OcaGain>.classVersion,
+      type: SwiftOCADevice.OcaGroup<SwiftOCADevice.OcaGain>.self,
+      remoteObjectNumber: OcaONoMask(oNo: 0x500, mask: 0),
+      referenceProperties: [
+        OcaPropertyID("3.1"): OcaProfileReferencePropertySchema(targetMatch: targetMatch),
+      ]
+    )
+    let gainSchema = OcaProfileObjectSchema(
+      role: "Gain",
+      type: SwiftOCADevice.OcaGain.self,
+      remoteObjectNumber: OcaONoMask(oNo: 0x600, mask: 0)
+    )
+    let blockSchema = OcaProfileObjectSchema(
+      role: "Block",
+      declaredClassID: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>.classID,
+      declaredClassVersion: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>.classVersion,
+      type: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>.self,
+      remoteObjectNumber: OcaONoMask(oNo: 0x400, mask: 0),
+      actionObjectSchema: [gainSchema, groupSchema]
+    )
+    let profileSchema = OcaProfileSchema(name: "Test", blocks: [blockSchema])
+
+    let lookup = OcaProfile._referencePropertyIDsByClassID(from: profileSchema)
+
+    #expect(lookup[groupClassID.description] == ["3.1"])
+    // gain and block should not appear
+    #expect(lookup[SwiftOCADevice.OcaGain.classID.description] == nil)
+    #expect(lookup[SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>.classID.description] == nil)
+  }
+
+  @Test
+  func emptyReferencePropertyIDsPreservesLegacyBehavior() {
+    let jsonObject: [String: Any] = [
+      "_oNo": OcaONo(0x1000),
+      "_classID": "1.1.3",
+      "4.1": OcaONo(999),
+    ]
+
+    // default (no referencePropertyIDs) should behave like the original function
+    let result = OcaProfile._remapObjectNumbers(
+      in: jsonObject,
+      transform: { $0 + 1 }
+    ) as! [String: Any]
+
+    #expect(result["_oNo"] as? OcaONo == 0x1001)
+    #expect(result["4.1"] as? OcaONo == 999) // untouched
+  }
 }

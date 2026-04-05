@@ -144,6 +144,9 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
   /// overwriting the local proxy state during activation (initial property copy).
   var activatingDevices = Set<SwiftOCA.OcaConnectionBroker.DeviceIdentifier>()
 
+  /// Number of times the param-set initial sync path was used successfully.
+  private(set) var paramSetSyncCount = 0
+
   // maps local device object numbers to their bindings for efficient event dispatch
   private var objectBindings = [OcaONo: any OcaObjectBindingRepresentable]()
 
@@ -853,11 +856,10 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     let localToRemoteONo = localToRemoteONoVar
     let schemaByLocalONo = schemaByLocalONoVar
 
-    // find the local block that corresponds to this schema entry
+    // find the local object that corresponds to this schema entry
     guard let localONo = try objectNumber(for: schema.localObjectNumber),
           let localBlock = proxyBlock.actionObjects
       .first(where: { $0.objectNumber == localONo })
-            as? SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>
     else {
       throw Ocp1Error.status(.deviceError)
     }
@@ -1004,13 +1006,24 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
 
       // Register remote objects in bindings (without copying properties)
       // and lock if needed.
-      for (binding, remoteObject) in resolvedBindings {
-        try await binding.bind(
-          remoteObject: remoteObject,
-          from: deviceIdentifier,
-          skipCopy: true
-        )
+      var boundBindings = [(any OcaObjectBindingRepresentable, SwiftOCA.OcaRoot)]()
+      do {
+        for (binding, remoteObject) in resolvedBindings {
+          try await binding.bind(
+            remoteObject: remoteObject,
+            from: deviceIdentifier,
+            skipCopy: true
+          )
+          boundBindings.append((binding, remoteObject))
+        }
+      } catch {
+        // clean up partially-bound bindings before rethrowing
+        for (binding, remoteObject) in boundBindings {
+          try? await binding.unbind(remoteObject: remoteObject, from: deviceIdentifier)
+        }
+        throw error
       }
+      paramSetSyncCount += 1
     } else {
       // Phase 1 (per-property): copy properties to all remote objects before
       // subscribing, so that no subscription events can overwrite local proxy state.

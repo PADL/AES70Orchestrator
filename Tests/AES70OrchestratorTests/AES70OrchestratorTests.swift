@@ -2739,6 +2739,13 @@ struct EndToEndTests {
     // allow time for param-set apply to complete
     try await Task.sleep(for: .seconds(2))
 
+    // verify the param-set path was actually used (not the per-property fallback)
+    let syncCount = await profile.paramSetSyncCount
+    #expect(
+      syncCount > 0,
+      "param-set sync path should have been used, but paramSetSyncCount is \(syncCount)"
+    )
+
     // remote gain should have been updated via param-set blob
     let remoteValue = await remoteGain.gain.value
     #expect(

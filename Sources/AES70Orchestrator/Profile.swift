@@ -988,7 +988,7 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
           throw Ocp1Error.status(.parameterError)
         }
         coordinator?.logger.debug(
-          "bindRemoteObjects: applying param-set blob (\(Data(blob).count) bytes) to remote block \(remoteONo) on \(deviceIdentifier)"
+          "bindRemoteObjects: applying param-set blob (\(blob.count) bytes) to remote block \(remoteONo) on \(deviceIdentifier)"
         )
         try await remoteBlock.apply(parameterData: blob)
       } catch {
@@ -997,7 +997,7 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
         )
         // fall back to per-property copy
         for (binding, remoteObject) in resolvedBindings {
-          try await binding.bind(remoteObject: remoteObject, from: deviceIdentifier, skipCopy: false)
+          try await binding.bind(remoteObject: remoteObject, from: deviceIdentifier, skipInitialPropertyCopy: false)
         }
         for (binding, _) in resolvedBindings {
           try await binding.subscribe(to: deviceIdentifier)
@@ -1013,7 +1013,7 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
           try await binding.bind(
             remoteObject: remoteObject,
             from: deviceIdentifier,
-            skipCopy: true
+            skipInitialPropertyCopy: true
           )
           boundBindings.append((binding, remoteObject))
         }
@@ -1029,7 +1029,7 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
       // Phase 1 (per-property): copy properties to all remote objects before
       // subscribing, so that no subscription events can overwrite local proxy state.
       for (binding, remoteObject) in resolvedBindings {
-        try await binding.bind(remoteObject: remoteObject, from: deviceIdentifier, skipCopy: false)
+        try await binding.bind(remoteObject: remoteObject, from: deviceIdentifier, skipInitialPropertyCopy: false)
       }
     }
 

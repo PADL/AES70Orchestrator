@@ -14,11 +14,7 @@
 // limitations under the License.
 //
 
-#if canImport(FoundationEssentials)
-import FoundationEssentials
-#else
 import Foundation
-#endif
 import Gzip
 @_spi(SwiftOCAPrivate) import SwiftOCA
 @_spi(SwiftOCAPrivate) import SwiftOCADevice

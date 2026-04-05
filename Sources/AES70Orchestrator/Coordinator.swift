@@ -344,7 +344,7 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
   }
 
   public func onEvent(_ event: SwiftOCA.OcaEvent, parameters: Data) async {
-    logger.trace("onEvent: emitterONo=\(event.emitterONo), eventID=\(event.eventID)")
+    logger.trace("onEvent: emitterONo=\(event.emitterONo.oNoString), eventID=\(event.eventID)")
     for entry in _schemaEntries.values {
       for profile in entry.profiles.actionObjects {
         await profile.handleLocalEvent(event, parameters: parameters)
@@ -517,7 +517,7 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
       let schema = try profile.profileSchema
       var activatedBlocks = [OcaProfileObjectSchema]()
       logger.debug(
-        "activate: profileONo=\(profile.objectNumber) schema=\(profile.schemaName) device=\(deviceIdentifier.id) index=\(index) blocks=\(schema.blocks.map(\.role))"
+        "activate: profileONo=\(profile.objectNumber.oNoString) schema=\(profile.schemaName) device=\(deviceIdentifier.id) index=\(index) blocks=\(schema.blocks.map(\.role))"
       )
       do {
         profile.activatingDevices.insert(deviceIdentifier)

@@ -260,18 +260,18 @@ public final class OcaObjectBinding<
           from: remappedEventData.propertyValue
         ) {
           profile?.coordinator?.logger.trace(
-            "bind copy: local \(localObject.objectNumber) -> remote \(remoteObject.objectNumber) property \(propertyID) remoteONos=\(onos)"
+            "bind copy: local \(localObject.objectNumber.oNoString) -> remote \(remoteObject.objectNumber.oNoString) property \(propertyID) remoteONos=\(onos.map(\.oNoString))"
           )
         } else if let oNo = try? Ocp1Decoder().decode(
           OcaONo.self,
           from: remappedEventData.propertyValue
         ) {
           profile?.coordinator?.logger.trace(
-            "bind copy: local \(localObject.objectNumber) -> remote \(remoteObject.objectNumber) property \(propertyID) remoteONo=\(oNo)"
+            "bind copy: local \(localObject.objectNumber.oNoString) -> remote \(remoteObject.objectNumber.oNoString) property \(propertyID) remoteONo=\(oNo.oNoString)"
           )
         } else {
           profile?.coordinator?.logger.trace(
-            "bind copy: local \(localObject.objectNumber) -> remote \(remoteObject.objectNumber) property \(propertyID) bytes=\(remappedEventData.propertyValue.count)"
+            "bind copy: local \(localObject.objectNumber.oNoString) -> remote \(remoteObject.objectNumber.oNoString) property \(propertyID) bytes=\(remappedEventData.propertyValue.count)"
           )
         }
       }
@@ -289,7 +289,7 @@ public final class OcaObjectBinding<
     guard !_forwardingFromRemote else { return }
     guard let eventData = try? OcaPropertyChangedEventData<Data>(data: parameters) else {
       profile?.coordinator?.logger.warning(
-        "handleLocalEvent: failed to decode event data for ONo \(event.emitterONo)"
+        "handleLocalEvent: failed to decode event data for ONo \(event.emitterONo.oNoString)"
       )
       return
     }
@@ -337,7 +337,7 @@ public final class OcaObjectBinding<
   ) async {
     guard let eventData = try? OcaPropertyChangedEventData<Data>(data: parameters) else {
       profile?.coordinator?.logger.trace(
-        "handleRemoteEvent: failed to decode event data from \(origin) for ONo \(event.emitterONo)"
+        "handleRemoteEvent: failed to decode event data from \(origin) for ONo \(event.emitterONo.oNoString)"
       )
       return
     }
@@ -418,7 +418,7 @@ public final class OcaObjectBinding<
     }
     remoteObjects[remoteDevice] = remoteObject
     profile?.coordinator?.logger.trace(
-      "bind: local object \(localObject.objectNumber) bound to remote object \(remoteObject.objectNumber) on \(remoteDevice)\(skipInitialPropertyCopy ? " (param-set sync)" : "")"
+      "bind: local object \(localObject.objectNumber.oNoString) bound to remote object \(remoteObject.objectNumber.oNoString) on \(remoteDevice)\(skipInitialPropertyCopy ? " (param-set sync)" : "")"
     )
     if !skipInitialPropertyCopy {
       try await _copyProperties(to: remoteObject, remoteDevice: remoteDevice)

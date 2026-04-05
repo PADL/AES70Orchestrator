@@ -185,7 +185,7 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
   func handleLocalEvent(_ event: OcaEvent, parameters: Data) async {
     if let binding = objectBindings[event.emitterONo] {
       coordinator?.logger.trace(
-        "handleLocalEvent: \(self) matched binding for ONo \(event.emitterONo)"
+        "handleLocalEvent: \(self) matched binding for ONo \(event.emitterONo.oNoString)"
       )
       await binding.handleLocalEvent(event, parameters: parameters)
     }
@@ -723,7 +723,7 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
       remoteObject = try await connection.resolve(objectOfUnknownClass: remoteONo)
     } catch let error as Ocp1Error where error == .status(.badONo) {
       coordinator?.logger.trace(
-        "Skipping missing remote object for \(self) at \(rolePath.joined(separator: "/")) on \(deviceIdentifier) (oNo=\(remoteONo))"
+        "Skipping missing remote object for \(self) at \(rolePath.joined(separator: "/")) on \(deviceIdentifier) (oNo=\(remoteONo.oNoString))"
       )
       return
     }
@@ -1063,7 +1063,7 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
           throw Ocp1Error.status(.parameterError)
         }
         coordinator?.logger.debug(
-          "bindRemoteObjects: applying param-set blob (\(blob.count) bytes) to remote block \(remoteONo) on \(deviceIdentifier)"
+          "bindRemoteObjects: applying param-set blob (\(blob.count) bytes) to remote block \(remoteONo.oNoString) on \(deviceIdentifier)"
         )
         try await remoteBlock.apply(parameterData: blob)
       } catch {

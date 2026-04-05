@@ -142,9 +142,9 @@ public final class OcaObjectBinding<
       return eventData
     }
 
-    return OcaAnyPropertyChangedEventData(
+    return try OcaAnyPropertyChangedEventData(
       propertyID: eventData.propertyID,
-      propertyValue: try profile.remapReferencePropertyDataToRemote(
+      propertyValue: profile.remapReferencePropertyDataToRemote(
         eventData.propertyValue,
         targetMatch: referenceProperty.targetMatch,
         deviceIndex: deviceIndex,
@@ -165,9 +165,9 @@ public final class OcaObjectBinding<
       return eventData
     }
 
-    return OcaAnyPropertyChangedEventData(
+    return try OcaAnyPropertyChangedEventData(
       propertyID: eventData.propertyID,
-      propertyValue: try profile.remapReferencePropertyDataToLocal(
+      propertyValue: profile.remapReferencePropertyDataToLocal(
         eventData.propertyValue,
         targetMatch: referenceProperty.targetMatch,
         deviceIndex: deviceIndex
@@ -210,27 +210,28 @@ public final class OcaObjectBinding<
     }
 
     let capturedValues = _CapturedPropertyValues()
-    let lockRemote = self.lockRemote
+    let lockRemote = lockRemote
     let lockStatePropertyID = Self._lockStatePropertyID
-    let includeProperties = self.includeProperties
-    let excludeProperties = self.excludeProperties
+    let includeProperties = includeProperties
+    let excludeProperties = excludeProperties
     let localObjectNumber = localObject.objectNumber
-    _ = try localObject.serialize(flags: [.ignoreEncodingErrors]) { [capturedValues] object, propertyID, value in
-      guard object.objectNumber == localObjectNumber else {
+    _ = try localObject
+      .serialize(flags: [.ignoreEncodingErrors]) { [capturedValues] object, propertyID, value in
+        guard object.objectNumber == localObjectNumber else {
+          return .ignore
+        }
+        if lockRemote, propertyID == lockStatePropertyID {
+          return .ignore
+        }
+        if let includeProperties, !includeProperties.contains(propertyID) {
+          return .ignore
+        }
+        if excludeProperties.contains(propertyID) {
+          return .ignore
+        }
+        capturedValues.values.append((propertyID, value))
         return .ignore
       }
-      if lockRemote, propertyID == lockStatePropertyID {
-        return .ignore
-      }
-      if let includeProperties, !includeProperties.contains(propertyID) {
-        return .ignore
-      }
-      if excludeProperties.contains(propertyID) {
-        return .ignore
-      }
-      capturedValues.values.append((propertyID, value))
-      return .ignore
-    }
 
     for (propertyID, value) in capturedValues.values {
       let encodedValue: Data
@@ -249,13 +250,22 @@ public final class OcaObjectBinding<
         emitterONo: remoteObject.objectNumber,
         eventID: OcaPropertyChangedEventID
       )
-      let remappedEventData = try _remapEventDataForRemote(eventData, deviceIdentifier: remoteDevice)
+      let remappedEventData = try _remapEventDataForRemote(
+        eventData,
+        deviceIdentifier: remoteDevice
+      )
       if referenceProperties[propertyID] != nil || propertyID == OcaPropertyID("3.1") {
-        if let onos = try? Ocp1Decoder().decode([OcaONo].self, from: remappedEventData.propertyValue) {
+        if let onos = try? Ocp1Decoder().decode(
+          [OcaONo].self,
+          from: remappedEventData.propertyValue
+        ) {
           profile?.coordinator?.logger.trace(
             "bind copy: local \(localObject.objectNumber) -> remote \(remoteObject.objectNumber) property \(propertyID) remoteONos=\(onos)"
           )
-        } else if let oNo = try? Ocp1Decoder().decode(OcaONo.self, from: remappedEventData.propertyValue) {
+        } else if let oNo = try? Ocp1Decoder().decode(
+          OcaONo.self,
+          from: remappedEventData.propertyValue
+        ) {
           profile?.coordinator?.logger.trace(
             "bind copy: local \(localObject.objectNumber) -> remote \(remoteObject.objectNumber) property \(propertyID) remoteONo=\(oNo)"
           )
@@ -303,7 +313,7 @@ public final class OcaObjectBinding<
       do {
         try await remoteObject.forward(
           event: remoteEvent,
-          eventData: try _remapEventDataForRemote(eventData, deviceIdentifier: deviceID)
+          eventData: _remapEventDataForRemote(eventData, deviceIdentifier: deviceID)
         )
       } catch Ocp1Error.noConnectionDelegate {
         forgetRemoteObject(for: deviceID)
@@ -331,7 +341,8 @@ public final class OcaObjectBinding<
       )
       return
     }
-    guard let localEventData = try? _remapEventDataForLocal(eventData, deviceIdentifier: origin) else {
+    guard let localEventData = try? _remapEventDataForLocal(eventData, deviceIdentifier: origin)
+    else {
       profile?.coordinator?.logger.trace(
         "handleRemoteEvent: failed to remap event data from \(origin) for propertyID \(eventData.propertyID)"
       )
@@ -377,7 +388,10 @@ public final class OcaObjectBinding<
       let remoteEvent = OcaEvent(emitterONo: remoteObject.objectNumber, eventID: event.eventID)
       let forwardedEventData: OcaAnyPropertyChangedEventData
       do {
-        forwardedEventData = try _remapEventDataForRemote(localEventData, deviceIdentifier: deviceID)
+        forwardedEventData = try _remapEventDataForRemote(
+          localEventData,
+          deviceIdentifier: deviceID
+        )
       } catch {
         profile?.coordinator?.logger.trace(
           "handleRemoteEvent: failed to remap event data for \(deviceID): \(error)"

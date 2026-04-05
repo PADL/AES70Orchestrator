@@ -158,7 +158,8 @@ extension OcaCoordinator {
                 "load: deserialized profile \(uuidString) schema=\(schemaName) profileONo=\(profile.objectNumber) proxyBlockONo=\(profile.proxyBlock?.objectNumber ?? OcaInvalidONo)"
               )
             } catch {
-              logger.warning("load: failed to deserialize state for profile \(uuidString): \(error)")
+              logger
+                .warning("load: failed to deserialize state for profile \(uuidString): \(error)")
             }
           } else {
             logger.warning("load: invalid state data for profile \(uuidString)")

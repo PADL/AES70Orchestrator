@@ -90,7 +90,7 @@ extension OcaDeviceSchema {
     node: Node
   ) throws -> OcaProfileReferencePropertySchema {
     if let string = node.string {
-      return OcaProfileReferencePropertySchema(targetMatch: try OcaONoMask(string))
+      return try OcaProfileReferencePropertySchema(targetMatch: OcaONoMask(string))
     }
 
     guard let mapping = node.mapping else {
@@ -106,7 +106,7 @@ extension OcaDeviceSchema {
       )
     }
 
-    return OcaProfileReferencePropertySchema(targetMatch: try OcaONoMask(targetMatchString))
+    return try OcaProfileReferencePropertySchema(targetMatch: OcaONoMask(targetMatchString))
   }
 
   private static func _parsePropertyDefaults(
@@ -220,7 +220,10 @@ extension OcaDeviceSchema {
 
     // parse children first to determine if this is a container
     var actionObjects = [OcaProfileObjectSchema]()
-    if let actionObjectNodes = Self._node(in: props, keys: ["action-objects", "actionObjects", "members"])?
+    if let actionObjectNodes = Self._node(
+      in: props,
+      keys: ["action-objects", "actionObjects", "members"]
+    )?
       .sequence
     {
       for child in actionObjectNodes {
@@ -236,18 +239,17 @@ extension OcaDeviceSchema {
       .int
       .map(OcaClassVersionNumber.init)
 
-    let type: SwiftOCADevice.OcaRoot.Type
-    if let classID = declaredClassID {
-      type = try OcaDeviceClassRegistry.shared.match(
+    let type: SwiftOCADevice.OcaRoot.Type = if let classID = declaredClassID {
+      try OcaDeviceClassRegistry.shared.match(
         classIdentification: OcaClassIdentification(
           classID: classID,
           classVersion: declaredClassVersion ?? SwiftOCA.OcaRoot.classVersion
         )
       )
     } else if !actionObjects.isEmpty {
-      type = SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>.self
+      SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>.self
     } else {
-      type = SwiftOCADevice.OcaRoot.self
+      SwiftOCADevice.OcaRoot.self
     }
 
     // parse remote object number (match)
@@ -259,7 +261,9 @@ extension OcaDeviceSchema {
 
     // parse optional local object number
     var localObjectNumber: OcaONoMask?
-    if let oNoString = Self._node(in: props, keys: ["object-number", "objectNumber", "ono", "oNo"])?.string {
+    if let oNoString = Self._node(in: props, keys: ["object-number", "objectNumber", "ono", "oNo"])?
+      .string
+    {
       localObjectNumber = try OcaONoMask(oNoString)
     }
 

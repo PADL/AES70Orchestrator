@@ -93,7 +93,6 @@ final class _SchemaEntry {
     nextProfileIndex += 1
     return index
   }
-
 }
 
 /// The central coordinator that manages profile lifecycle, device discovery, and binding.

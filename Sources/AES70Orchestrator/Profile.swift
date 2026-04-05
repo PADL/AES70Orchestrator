@@ -336,7 +336,11 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     targetMatch: OcaONoMask,
     deviceIndex: OcaONo
   ) throws -> [OcaONo] {
-    try onos.map { try remapReferenceONoToRemote($0, targetMatch: targetMatch, deviceIndex: deviceIndex) }
+    try onos.map { try remapReferenceONoToRemote(
+      $0,
+      targetMatch: targetMatch,
+      deviceIndex: deviceIndex
+    ) }
   }
 
   private func _remoteReferenceExists(
@@ -383,7 +387,11 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     targetMatch: OcaONoMask,
     deviceIndex: OcaONo
   ) throws -> [OcaONo] {
-    try onos.map { try remapReferenceONoToLocal($0, targetMatch: targetMatch, deviceIndex: deviceIndex) }
+    try onos.map { try remapReferenceONoToLocal(
+      $0,
+      targetMatch: targetMatch,
+      deviceIndex: deviceIndex
+    ) }
   }
 
   func remapReferencePropertyDataToRemote(
@@ -633,8 +641,8 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     for (key, value) in result {
       guard let propertyID = try? OcaPropertyID(unsafeString: key),
             propertyID == Self._actionObjectsPropertyID
-              || propertyID == Self._ownerPropertyID
-              || schema?.referenceProperty(for: propertyID) != nil
+            || propertyID == Self._ownerPropertyID
+            || schema?.referenceProperty(for: propertyID) != nil
       else {
         continue
       }
@@ -792,25 +800,73 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     jsonObject["3.2"] = actionArray
   }
 
-  /// Recursively remap all `_oNo` values in a JSON object tree using the provided transform.
-  private static func _remapObjectNumbers(
+  /// Build a lookup from class ID string to the set of property ID strings
+  /// that are reference properties (i.e. contain OcaONo values requiring remapping).
+  private static func _referencePropertyIDsByClassID(
+    from schema: OcaProfileSchema
+  ) -> [String: Set<String>] {
+    var result = [String: Set<String>]()
+    for block in schema.blocks {
+      block.applyRecursive { objectSchema, _, _ in
+        guard !objectSchema.referenceProperties.isEmpty else { return }
+        let classID = (objectSchema.declaredClassID ?? objectSchema.type.classID).description
+        for propID in objectSchema.referenceProperties.keys {
+          result[classID, default: []].insert(propID.description)
+        }
+      }
+    }
+    return result
+  }
+
+  /// Recursively remap all `_oNo` values and reference property ONo values in a
+  /// JSON object tree using the provided transform.  Reference properties are
+  /// identified by matching the object's `_classID` against `referencePropertyIDs`.
+  static func _remapObjectNumbers(
     in jsonObject: Any,
+    referencePropertyIDs: [String: Set<String>] = [:],
     transform: (OcaONo) -> OcaONo
   ) -> Any {
     if let dict = jsonObject as? [String: Any] {
       var result = [String: Any]()
+      let classID = dict["_classID"] as? String
+      let refProps = classID.flatMap { referencePropertyIDs[$0] } ?? []
       for (key, value) in dict {
         if key == "_oNo", let oNo = value as? OcaONo {
           result[key] = transform(oNo)
+        } else if refProps.contains(key) {
+          result[key] = _remapReferencePropertyValue(value, transform: transform)
         } else {
-          result[key] = _remapObjectNumbers(in: value, transform: transform)
+          result[key] = _remapObjectNumbers(
+            in: value,
+            referencePropertyIDs: referencePropertyIDs,
+            transform: transform
+          )
         }
       }
       return result
     } else if let array = jsonObject as? [Any] {
-      return array.map { _remapObjectNumbers(in: $0, transform: transform) }
+      return array.map {
+        _remapObjectNumbers(
+          in: $0,
+          referencePropertyIDs: referencePropertyIDs,
+          transform: transform
+        )
+      }
     }
     return jsonObject
+  }
+
+  /// Remap OcaONo values within a reference property value.
+  private static func _remapReferencePropertyValue(
+    _ value: Any,
+    transform: (OcaONo) -> OcaONo
+  ) -> Any {
+    if let onos = value as? [OcaONo] {
+      return onos.map(transform)
+    } else if let oNo = value as? OcaONo {
+      return transform(oNo)
+    }
+    return value
   }
 
   /// Compute the `_deviceModel` JSON value for an `OcaModelGUID`.
@@ -859,7 +915,7 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     // find the local container that corresponds to this schema entry
     guard let localONo = try objectNumber(for: schema.localObjectNumber),
           let localBlock = proxyBlock.actionObjects
-      .first(where: { $0.objectNumber == localONo }),
+          .first(where: { $0.objectNumber == localONo }),
           localBlock is any SwiftOCADevice.OcaBlockContainer
     else {
       throw Ocp1Error.status(.deviceError)
@@ -890,6 +946,10 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
           return .replace(onos.map { localToRemoteONo[$0] ?? $0 })
         } else if let oNo = value as? OcaONo {
           return .replace(localToRemoteONo[oNo] ?? oNo)
+        } else if let objects = value as? [SwiftOCADevice.OcaRoot] {
+          return .replace(objects.map { localToRemoteONo[$0.objectNumber] ?? $0.objectNumber })
+        } else if let object = value as? SwiftOCADevice.OcaRoot {
+          return .replace(localToRemoteONo[object.objectNumber] ?? object.objectNumber)
         }
       }
       return .ok
@@ -897,10 +957,15 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
 
     var jsonObject = try localBlock.serialize(flags: [.ignoreEncodingErrors], filter: filter)
 
-    // remap _oNo values from local to remote space
-    guard let remapped = Self._remapObjectNumbers(in: jsonObject, transform: { oNo in
-      localToRemoteONo[oNo] ?? oNo
-    }) as? [String: any Sendable] else {
+    // remap _oNo values and reference property ONos from local to remote space
+    let referencePropertyIDs = (try? Self._referencePropertyIDsByClassID(
+      from: profileSchema
+    )) ?? [:]
+    guard let remapped = Self._remapObjectNumbers(
+      in: jsonObject,
+      referencePropertyIDs: referencePropertyIDs,
+      transform: { oNo in localToRemoteONo[oNo] ?? oNo }
+    ) as? [String: any Sendable] else {
       throw Ocp1Error.status(.deviceError)
     }
     jsonObject = remapped
@@ -997,7 +1062,11 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
         )
         // fall back to per-property copy
         for (binding, remoteObject) in resolvedBindings {
-          try await binding.bind(remoteObject: remoteObject, from: deviceIdentifier, skipInitialPropertyCopy: false)
+          try await binding.bind(
+            remoteObject: remoteObject,
+            from: deviceIdentifier,
+            skipInitialPropertyCopy: false
+          )
         }
         for (binding, _) in resolvedBindings {
           try await binding.subscribe(to: deviceIdentifier)
@@ -1029,7 +1098,11 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
       // Phase 1 (per-property): copy properties to all remote objects before
       // subscribing, so that no subscription events can overwrite local proxy state.
       for (binding, remoteObject) in resolvedBindings {
-        try await binding.bind(remoteObject: remoteObject, from: deviceIdentifier, skipInitialPropertyCopy: false)
+        try await binding.bind(
+          remoteObject: remoteObject,
+          from: deviceIdentifier,
+          skipInitialPropertyCopy: false
+        )
       }
     }
 

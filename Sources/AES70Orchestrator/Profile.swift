@@ -802,7 +802,7 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
 
   /// Build a lookup from class ID string to the set of property ID strings
   /// that are reference properties (i.e. contain OcaONo values requiring remapping).
-  static func _referencePropertyIDsByClassID(
+  nonisolated static func _referencePropertyIDsByClassID(
     from schema: OcaProfileSchema
   ) -> [String: Set<String>] {
     var result = [String: Set<String>]()
@@ -821,7 +821,7 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
   /// Recursively remap all `_oNo` values and reference property ONo values in a
   /// JSON object tree using the provided transform.  Reference properties are
   /// identified by matching the object's `_classID` against `referencePropertyIDs`.
-  static func _remapObjectNumbers(
+  nonisolated static func _remapObjectNumbers(
     in jsonObject: Any,
     referencePropertyIDs: [String: Set<String>] = [:],
     transform: (OcaONo) -> OcaONo
@@ -857,7 +857,7 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
   }
 
   /// Remap OcaONo values within a reference property value.
-  private static func _remapReferencePropertyValue(
+  nonisolated private static func _remapReferencePropertyValue(
     _ value: Any,
     transform: (OcaONo) -> OcaONo
   ) -> Any {

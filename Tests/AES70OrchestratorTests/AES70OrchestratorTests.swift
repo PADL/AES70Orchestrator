@@ -2950,7 +2950,7 @@ struct EndToEndTests {
     // assign both gains as group members on local proxy
     try await localGroup.add(member: localGain1)
     try await localGroup.add(member: localGain2)
-    #expect(localGroup.members.count == 2)
+    #expect(await localGroup.members.count == 2)
 
     // connect to the remote device
     let deviceIdentifier = OcaConnectionBroker.DeviceIdentifier(
@@ -3000,7 +3000,7 @@ struct EndToEndTests {
     )
 
     // remote group should have both gains as members with REMOTE ONos
-    let remoteMemberONos = remoteGroup.members.map(\.objectNumber)
+    let remoteMemberONos = await remoteGroup.members.map(\.objectNumber)
     #expect(
       remoteMemberONos.contains(Self.remoteParamSetGroupGain1ONo),
       "remote group should contain gain 1 (ONo \(Self.remoteParamSetGroupGain1ONo)), got \(remoteMemberONos)"
@@ -3025,7 +3025,7 @@ struct RemapObjectNumbersTests {
   private static let groupClassID = SwiftOCADevice.OcaGroup<SwiftOCADevice.OcaGain>.classID
 
   @Test
-  func remapsONoKeysWithoutReferenceProperties() async {
+  func remapsONoKeysWithoutReferenceProperties() {
     let jsonObject: [String: Any] = [
       "_oNo": OcaONo(0x1000),
       "_classID": "1.1.3",
@@ -3053,12 +3053,12 @@ struct RemapObjectNumbersTests {
   @Test
   func remapsArrayReferenceProperty() {
     let refProps: [String: Set<String>] = [
-      groupClassID.description: ["3.1"],
+      Self.groupClassID.description: ["3.1"],
     ]
 
     let jsonObject: [String: Any] = [
       "_oNo": OcaONo(0x5000),
-      "_classID": groupClassID.description,
+      "_classID": Self.groupClassID.description,
       "3.1": [OcaONo(0x6000), OcaONo(0x7000)],
     ]
 
@@ -3100,12 +3100,12 @@ struct RemapObjectNumbersTests {
   @Test
   func doesNotRemapNonReferenceIntegerProperties() {
     let refProps: [String: Set<String>] = [
-      groupClassID.description: ["3.1"],
+      Self.groupClassID.description: ["3.1"],
     ]
 
     let jsonObject: [String: Any] = [
       "_oNo": OcaONo(0x5000),
-      "_classID": groupClassID.description,
+      "_classID": Self.groupClassID.description,
       "3.1": [OcaONo(0x6000)],
       "2.1": OcaONo(0x9999),
     ]
@@ -3127,7 +3127,7 @@ struct RemapObjectNumbersTests {
   @Test
   func doesNotRemapWhenClassIDMissing() {
     let refProps: [String: Set<String>] = [
-      groupClassID.description: ["3.1"],
+      Self.groupClassID.description: ["3.1"],
     ]
 
     let jsonObject: [String: Any] = [
@@ -3151,7 +3151,7 @@ struct RemapObjectNumbersTests {
   @Test
   func doesNotRemapWhenClassIDDoesNotMatchSchema() {
     let refProps: [String: Set<String>] = [
-      groupClassID.description: ["3.1"],
+      Self.groupClassID.description: ["3.1"],
     ]
 
     let jsonObject: [String: Any] = [
@@ -3174,7 +3174,7 @@ struct RemapObjectNumbersTests {
   @Test
   func remapsNestedReferenceProperties() {
     let refProps: [String: Set<String>] = [
-      groupClassID.description: ["3.1"],
+      Self.groupClassID.description: ["3.1"],
     ]
 
     let jsonObject: [String: Any] = [
@@ -3183,7 +3183,7 @@ struct RemapObjectNumbersTests {
       "3.2": [
         [
           "_oNo": OcaONo(0x5000),
-          "_classID": groupClassID.description,
+          "_classID": Self.groupClassID.description,
           "3.1": [OcaONo(0x6000), OcaONo(0x7000)],
         ] as [String: Any],
         [
@@ -3217,7 +3217,7 @@ struct RemapObjectNumbersTests {
     let targetMatch = OcaONoMask(oNo: 0x6000, mask: 0xF0)
     let groupSchema = OcaProfileObjectSchema(
       role: "Group",
-      declaredClassID: groupClassID,
+      declaredClassID: Self.groupClassID,
       declaredClassVersion: SwiftOCADevice.OcaGroup<SwiftOCADevice.OcaGain>.classVersion,
       type: SwiftOCADevice.OcaGroup<SwiftOCADevice.OcaGain>.self,
       remoteObjectNumber: OcaONoMask(oNo: 0x500, mask: 0),
@@ -3242,7 +3242,7 @@ struct RemapObjectNumbersTests {
 
     let lookup = OcaProfile._referencePropertyIDsByClassID(from: profileSchema)
 
-    #expect(lookup[groupClassID.description] == ["3.1"])
+    #expect(lookup[Self.groupClassID.description] == ["3.1"])
     // gain and block should not appear
     #expect(lookup[SwiftOCADevice.OcaGain.classID.description] == nil)
     #expect(lookup[SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>.classID.description] == nil)

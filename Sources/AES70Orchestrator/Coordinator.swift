@@ -21,7 +21,7 @@ import Foundation
 #endif
 import AES70OrchestratorClient
 import Logging
-import SwiftOCA
+@_spi(SwiftOCAPrivate) import SwiftOCA
 import SwiftOCADevice
 
 let PADLCompanyID = OcaOrganizationID((0x0A, 0xE9, 0x1B))
@@ -344,7 +344,12 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
   }
 
   public func onEvent(_ event: SwiftOCA.OcaEvent, parameters: Data) async {
-    guard event.emitterONo != objectNumber else { return }
+    if event.emitterONo == objectNumber,
+       let eventData = try? OcaPropertyChangedEventData<Data>(data: parameters),
+       eventData.propertyID == OcaPropertyID("3.2")
+    {
+      return
+    }
     logger.trace("onEvent: emitterONo=\(event.emitterONo.oNoString), eventID=\(event.eventID)")
     for entry in _schemaEntries.values {
       for profile in entry.profiles.actionObjects {

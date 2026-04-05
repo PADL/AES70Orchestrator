@@ -847,7 +847,7 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
         guard let localONo = try objectNumber(for: objectSchema.localObjectNumber) else { return }
         let remoteONo = try objectSchema.remoteObjectNumber.objectNumber(for: deviceIndex)
         localToRemoteONoVar[localONo] = remoteONo
-        if block.role == schema.role {
+        if block.localObjectNumber == schema.localObjectNumber {
           schemaByLocalONoVar[localONo] = objectSchema
         }
       }
@@ -856,10 +856,11 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     let localToRemoteONo = localToRemoteONoVar
     let schemaByLocalONo = schemaByLocalONoVar
 
-    // find the local object that corresponds to this schema entry
+    // find the local container that corresponds to this schema entry
     guard let localONo = try objectNumber(for: schema.localObjectNumber),
           let localBlock = proxyBlock.actionObjects
-      .first(where: { $0.objectNumber == localONo })
+      .first(where: { $0.objectNumber == localONo }),
+          localBlock is any SwiftOCADevice.OcaBlockContainer
     else {
       throw Ocp1Error.status(.deviceError)
     }

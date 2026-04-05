@@ -2795,8 +2795,6 @@ struct EndToEndTests {
     )
     let groupSchema = OcaProfileObjectSchema(
       role: "Group",
-      declaredClassID: SwiftOCADevice.OcaGroup<SwiftOCADevice.OcaGain>.classID,
-      declaredClassVersion: SwiftOCADevice.OcaGroup<SwiftOCADevice.OcaGain>.classVersion,
       type: SwiftOCADevice.OcaGroup<SwiftOCADevice.OcaGain>.self,
       localObjectNumber: localParamSetGroupMask,
       remoteObjectNumber: OcaONoMask(oNo: remoteParamSetGroupONo, mask: 0),

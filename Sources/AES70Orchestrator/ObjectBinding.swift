@@ -432,6 +432,7 @@ public final class OcaObjectBinding<
   public func subscribe(
     to remoteDevice: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
   ) async throws {
+    guard !remoteFollowerOnly else { return }
     guard let remoteObject = remoteObjects[remoteDevice] else { return }
     guard let connectionDelegate = remoteObject.connectionDelegate else {
       throw Ocp1Error.noConnectionDelegate

@@ -344,6 +344,7 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
   }
 
   public func onEvent(_ event: SwiftOCA.OcaEvent, parameters: Data) async {
+    guard event.emitterONo != objectNumber else { return }
     logger.trace("onEvent: emitterONo=\(event.emitterONo.oNoString), eventID=\(event.eventID)")
     for entry in _schemaEntries.values {
       for profile in entry.profiles.actionObjects {

@@ -18,6 +18,8 @@ import SwiftOCA
 
 let PADLCompanyID = OcaOrganizationID((0x0A, 0xE9, 0x1B))
 
+/// Client-side proxy for the coordinator manager that manages profile lifecycle,
+/// device discovery, and binding on the orchestrator device.
 open class OcaCoordinator: SwiftOCA.OcaManager, @unchecked Sendable {
   override open class var classID: OcaClassID { OcaClassID(
     parent: super.classID,
@@ -25,12 +27,15 @@ open class OcaCoordinator: SwiftOCA.OcaManager, @unchecked Sendable {
     1
   ) }
 
+  /// The identifiers of all devices currently discovered by the connection broker.
   @OcaProperty(
     propertyID: OcaPropertyID("3.1"),
     getMethodID: OcaMethodID("3.1")
   )
   public var currentDeviceIdentifiers: OcaListProperty<OcaString>.PropertyValue
 
+  /// Timestamp of the most recent event processed by the coordinator; updated
+  /// after the debounce interval and used to trigger persistence.
   @OcaProperty(
     propertyID: OcaPropertyID("3.2"),
     getMethodID: OcaMethodID("3.12")

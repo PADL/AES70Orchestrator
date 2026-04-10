@@ -31,6 +31,12 @@ open class OcaCoordinator: SwiftOCA.OcaManager, @unchecked Sendable {
   )
   public var currentDeviceIdentifiers: OcaListProperty<OcaString>.PropertyValue
 
+  @OcaProperty(
+    propertyID: OcaPropertyID("3.2"),
+    getMethodID: OcaMethodID("3.12")
+  )
+  public var mostRecentEventTime: OcaProperty<OcaTime>.PropertyValue
+
   // MARK: - Profile management
 
   public struct AddProfileParameters: Ocp1ParametersReflectable, Sendable {

@@ -54,6 +54,8 @@ open class OcaCoordinator: SwiftOCA.OcaManager, @unchecked Sendable {
     }
   }
 
+  /// Creates a new profile for the given schema, returning its object number.
+  /// An optional display name may be provided; if omitted, the profile is unnamed.
   public func addProfile(schema: String, name: String? = nil) async throws -> OcaONo {
     try await sendCommandRrq(
       methodID: OcaMethodID("3.2"),
@@ -61,6 +63,7 @@ open class OcaCoordinator: SwiftOCA.OcaManager, @unchecked Sendable {
     )
   }
 
+  /// Sentinel value indicating the coordinator should automatically allocate a device index.
   public static let AutoDeviceIndex: OcaUint16 = 0xFFFF
 
   public struct BindProfileParameters: Ocp1ParametersReflectable, Sendable {
@@ -75,6 +78,9 @@ open class OcaCoordinator: SwiftOCA.OcaManager, @unchecked Sendable {
     }
   }
 
+  /// Binds a profile to a device, optionally at a specific device index. If `index` is
+  /// `nil`, the coordinator automatically allocates the next available index. If the
+  /// device is already connected, the profile's proxy objects are activated immediately.
   public func bind(
     profile profileONo: OcaONo,
     to deviceIdentifier: String,
@@ -100,6 +106,8 @@ open class OcaCoordinator: SwiftOCA.OcaManager, @unchecked Sendable {
     }
   }
 
+  /// Unbinds a profile from a device, deactivating its proxy objects and releasing
+  /// the device index.
   public func unbind(
     profile profileONo: OcaONo,
     from deviceIdentifier: String
@@ -125,6 +133,7 @@ open class OcaCoordinator: SwiftOCA.OcaManager, @unchecked Sendable {
     }
   }
 
+  /// Deletes a profile by its display name and schema.
   public func deleteProfile(named name: String, schema: String) async throws {
     try await sendCommandRrq(
       methodID: OcaMethodID("3.5"),
@@ -132,6 +141,7 @@ open class OcaCoordinator: SwiftOCA.OcaManager, @unchecked Sendable {
     )
   }
 
+  /// Deletes a profile by its UUID string.
   public func deleteProfile(uuid: String) async throws {
     try await sendCommandRrq(
       methodID: OcaMethodID("3.6"),
@@ -139,6 +149,7 @@ open class OcaCoordinator: SwiftOCA.OcaManager, @unchecked Sendable {
     )
   }
 
+  /// Deletes a profile by its object number.
   public func deleteProfile(oNo: OcaONo) async throws {
     try await sendCommandRrq(
       methodID: OcaMethodID("3.11"),
@@ -148,6 +159,7 @@ open class OcaCoordinator: SwiftOCA.OcaManager, @unchecked Sendable {
 
   // MARK: - Profile lookup
 
+  /// Looks up a profile by its display name and schema, returning its object number.
   public func findProfile(named name: String, schema: String) async throws -> OcaONo {
     try await sendCommandRrq(
       methodID: OcaMethodID("3.7"),
@@ -155,6 +167,7 @@ open class OcaCoordinator: SwiftOCA.OcaManager, @unchecked Sendable {
     )
   }
 
+  /// Looks up a profile by its UUID string, returning its object number.
   public func findProfile(uuid: String) async throws -> OcaONo {
     try await sendCommandRrq(
       methodID: OcaMethodID("3.8"),
@@ -164,10 +177,13 @@ open class OcaCoordinator: SwiftOCA.OcaManager, @unchecked Sendable {
 
   // MARK: - State import/export
 
+  /// Exports the coordinator's complete profile state as a compressed archive blob.
   public func export() async throws -> OcaLongBlob {
     try await sendCommandRrq(methodID: OcaMethodID("3.9"))
   }
 
+  /// Imports profile state from a previously exported compressed archive blob,
+  /// recreating profiles and restoring their device bindings.
   public func `import`(from blob: OcaLongBlob) async throws {
     try await sendCommandRrq(
       methodID: OcaMethodID("3.10"),

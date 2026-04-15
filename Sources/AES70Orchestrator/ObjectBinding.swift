@@ -46,7 +46,6 @@ protocol OcaObjectBindingRepresentable: Sendable {
     to remoteDevice: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
   ) async throws
   func unbind(
-    remoteObject: SwiftOCA.OcaRoot,
     from remoteDevice: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
   ) async throws
 }
@@ -449,7 +448,7 @@ public final class OcaObjectBinding<
     remoteSubscriptions[remoteDevice] = cancellable
   }
 
-  public func unbind(
+  private func unbind(
     remoteObject: SwiftOCA.OcaRoot,
     from remoteDevice: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
   ) async throws {
@@ -460,5 +459,12 @@ public final class OcaObjectBinding<
     if let cancellable = remoteSubscriptions.removeValue(forKey: remoteDevice) {
       try await remoteObject.connectionDelegate?.removeSubscription(cancellable)
     }
+  }
+
+  public func unbind(
+    from remoteDevice: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
+  ) async throws {
+    guard let remoteObject = remoteObjects[remoteDevice] else { return }
+    try await unbind(remoteObject: remoteObject, from: remoteDevice)
   }
 }

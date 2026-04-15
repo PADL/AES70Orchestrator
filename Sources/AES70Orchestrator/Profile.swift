@@ -691,61 +691,6 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     try await proxyBlock.deserializeParameterDataset(remapped)
   }
 
-  private func _forEachBinding(
-    deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier,
-    deviceIndex: OcaONo,
-    connection: Ocp1Connection,
-    schema: OcaProfileObjectSchema,
-    _ body: (any OcaObjectBindingRepresentable, SwiftOCA.OcaRoot) async throws -> ()
-  ) async throws {
-    try await _forEachBinding(
-      deviceIdentifier: deviceIdentifier,
-      deviceIndex: deviceIndex,
-      connection: connection,
-      schema: schema,
-      rolePath: [schema.role],
-      body,
-    )
-  }
-
-  private func _forEachBinding(
-    deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier,
-    deviceIndex: OcaONo,
-    connection: Ocp1Connection,
-    schema: OcaProfileObjectSchema,
-    rolePath: [String],
-    _ body: (any OcaObjectBindingRepresentable, SwiftOCA.OcaRoot) async throws -> ()
-  ) async throws {
-    let remoteONo = try schema.remoteObjectNumber.objectNumber(for: deviceIndex)
-    let remoteObject: SwiftOCA.OcaRoot
-
-    do {
-      remoteObject = try await connection.resolve(objectOfUnknownClass: remoteONo)
-    } catch let error as Ocp1Error where error == .status(.badONo) {
-      coordinator?.logger.trace(
-        "Skipping missing remote object for \(self) at \(rolePath.joined(separator: "/")) on \(deviceIdentifier) (oNo=\(remoteONo.oNoString))"
-      )
-      return
-    }
-
-    if let localONo = try objectNumber(for: schema.localObjectNumber),
-       let binding = objectBinding(for: localONo)
-    {
-      try await body(binding, remoteObject)
-    }
-
-    for child in schema.actionObjectSchema {
-      try await _forEachBinding(
-        deviceIdentifier: deviceIdentifier,
-        deviceIndex: deviceIndex,
-        connection: connection,
-        schema: child,
-        rolePath: rolePath + [child.role],
-        body,
-      )
-    }
-  }
-
   /// Recursively reorder the `"3.2"` (action objects) arrays in a serialized
   /// JSON block tree to match the schema's `actionObjectSchema` ordering.
   /// This ensures the remote device deserializes objects in schema-defined
@@ -1142,8 +1087,8 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
         }
       } catch {
         // clean up partially-bound bindings before rethrowing
-        for (binding, remoteObject) in boundBindings {
-          try? await binding.unbind(remoteObject: remoteObject, from: deviceIdentifier)
+        for (binding, _) in boundBindings {
+          try? await binding.unbind(from: deviceIdentifier)
         }
         throw error
       }
@@ -1161,8 +1106,12 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     }
 
     // Phase 2: subscribe to remote events now that all properties are pushed.
-    for (binding, _) in resolvedBindings {
-      try await binding.subscribe(to: deviceIdentifier)
+    try await withThrowingDiscardingTaskGroup { group in
+      for (binding, _) in resolvedBindings {
+        group.addTask {
+          try await binding.subscribe(to: deviceIdentifier)
+        }
+      }
     }
   }
 
@@ -1229,19 +1178,19 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     return true
   }
 
-  func unbindRemoteObjects(
-    from deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier,
-    deviceIndex: OcaONo,
-    connection: Ocp1Connection,
-    schema: OcaProfileObjectSchema
+  /// Unbind all remote objects for a device concurrently, using the stored
+  /// bindings rather than re-resolving from the connection.
+  func unbindAllRemoteObjects(
+    from deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
   ) async {
-    try? await _forEachBinding(
-      deviceIdentifier: deviceIdentifier,
-      deviceIndex: deviceIndex,
-      connection: connection,
-      schema: schema
-    ) { binding, remoteObject in
-      try await binding.unbind(remoteObject: remoteObject, from: deviceIdentifier)
+    let bindings = Array(objectBindings.values)
+
+    await withDiscardingTaskGroup { group in
+      for binding in bindings {
+        group.addTask {
+          try? await binding.unbind(from: deviceIdentifier)
+        }
+      }
     }
   }
 

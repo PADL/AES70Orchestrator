@@ -521,7 +521,6 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
       try await connectionBroker.connect(device: deviceIdentifier)
       let connection = try await _connection(for: deviceIdentifier)
       let schema = try profile.profileSchema
-      var activatedBlocks = [OcaProfileObjectSchema]()
       logger.debug(
         "activate: profileONo=\(profile.objectNumber.oNoString) schema=\(profile.schemaName) device=\(deviceIdentifier.id) index=\(index) blocks=\(schema.blocks.map(\.role))"
       )
@@ -544,21 +543,13 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
               to: deviceIdentifier, deviceIndex: index,
               connection: connection, schema: block
             )
-            activatedBlocks.append(block)
           }
-        } else {
-          activatedBlocks.append(contentsOf: schema.blocks)
         }
 
         logger.trace("Activated \(profile) for \(deviceIdentifier)")
       } catch {
         logger.warning("Failed to activate \(profile) for \(deviceIdentifier): \(error)")
-        for block in activatedBlocks {
-          await profile.unbindRemoteObjects(
-            from: deviceIdentifier, deviceIndex: index,
-            connection: connection, schema: block
-          )
-        }
+        await profile.unbindAllRemoteObjects(from: deviceIdentifier)
       }
     } catch {
       logger.warning("Failed to connect to \(deviceIdentifier) for activation: \(error)")
@@ -569,17 +560,9 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
     _ profile: OcaProfile,
     from deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
   ) async {
-    guard let index = profile.deviceIndices[deviceIdentifier] else { return }
+    guard profile.deviceIndices[deviceIdentifier] != nil else { return }
     logger.trace("Deactivating \(profile) from \(deviceIdentifier)")
-    guard let connection = try? await _connection(for: deviceIdentifier),
-          let schema = try? profile.profileSchema
-    else { return }
-    for block in schema.blocks {
-      await profile.unbindRemoteObjects(
-        from: deviceIdentifier, deviceIndex: index,
-        connection: connection, schema: block
-      )
-    }
+    await profile.unbindAllRemoteObjects(from: deviceIdentifier)
     logger.trace("Deactivated \(profile) from \(deviceIdentifier)")
   }
 

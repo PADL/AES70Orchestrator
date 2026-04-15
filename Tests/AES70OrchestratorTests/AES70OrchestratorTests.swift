@@ -3036,6 +3036,249 @@ struct EndToEndTests {
 
     _ = remoteDevice
   }
+
+  // MARK: - whole-profile param-set (multi-block)
+
+  private static let remoteMultiBlock1ONo: OcaONo = 0x1100
+  private static let remoteMultiGain1ONo: OcaONo = 0x1200
+  private static let remoteMultiBlock2ONo: OcaONo = 0x1300
+  private static let remoteMultiGain2ONo: OcaONo = 0x1400
+  private static let remoteMultiContainerONo: OcaONo = 0x1000
+  private static let localMultiBlock1Mask = OcaONoMask(oNo: 0x11000, mask: 0xF0)
+  private static let localMultiGain1Mask = OcaONoMask(oNo: 0x12000, mask: 0xF0)
+  private static let localMultiBlock2Mask = OcaONoMask(oNo: 0x13000, mask: 0xF0)
+  private static let localMultiGain2Mask = OcaONoMask(oNo: 0x14000, mask: 0xF0)
+
+  static func _makeMultiBlockSchema(modelGUID: OcaModelGUID) -> OcaDeviceSchema {
+    let gain1Schema = OcaProfileObjectSchema(
+      role: "Gain",
+      type: SwiftOCADevice.OcaGain.self,
+      localObjectNumber: localMultiGain1Mask,
+      remoteObjectNumber: OcaONoMask(oNo: remoteMultiGain1ONo, mask: 0)
+    )
+    let block1Schema = OcaProfileObjectSchema(
+      role: "Block1",
+      declaredClassID: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>.classID,
+      declaredClassVersion: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>.classVersion,
+      type: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>.self,
+      localObjectNumber: localMultiBlock1Mask,
+      remoteObjectNumber: OcaONoMask(oNo: remoteMultiBlock1ONo, mask: 0),
+      actionObjectSchema: [gain1Schema]
+    )
+    let gain2Schema = OcaProfileObjectSchema(
+      role: "Gain",
+      type: SwiftOCADevice.OcaGain.self,
+      localObjectNumber: localMultiGain2Mask,
+      remoteObjectNumber: OcaONoMask(oNo: remoteMultiGain2ONo, mask: 0)
+    )
+    let block2Schema = OcaProfileObjectSchema(
+      role: "Block2",
+      declaredClassID: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>.classID,
+      declaredClassVersion: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>.classVersion,
+      type: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>.self,
+      localObjectNumber: localMultiBlock2Mask,
+      remoteObjectNumber: OcaONoMask(oNo: remoteMultiBlock2ONo, mask: 0),
+      actionObjectSchema: [gain2Schema]
+    )
+    return OcaDeviceSchema(
+      name: "MultiBlockDevice",
+      models: [modelGUID],
+      paramSetInitialSync: true,
+      profileSchemas: [
+        OcaProfileSchema(name: "MultiBlock", blocks: [block1Schema, block2Schema]),
+      ]
+    )
+  }
+
+  static func _makeMultiBlockRemoteDevice(
+    port: UInt16,
+    serialNumber: String,
+    modelGUID: OcaModelGUID
+  ) async throws -> (
+    device: OcaDevice,
+    container: SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>,
+    gain1: SwiftOCADevice.OcaGain,
+    gain2: SwiftOCADevice.OcaGain,
+    endpointTask: Task<(), Error>
+  ) {
+    let device = OcaDevice()
+    try await device.initializeDefaultObjects()
+    let deviceManager = await device.deviceManager!
+    await _setDeviceManagerProperties(
+      deviceManager,
+      name: "E2E MultiBlock Remote Device",
+      serialNumber: serialNumber,
+      modelGUID: modelGUID
+    )
+
+    let container = try await SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>(
+      objectNumber: remoteMultiContainerONo,
+      role: "Container",
+      deviceDelegate: device,
+      addToRootBlock: true
+    )
+    let block1 = try await SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>(
+      objectNumber: remoteMultiBlock1ONo,
+      role: "Block1",
+      deviceDelegate: device,
+      addToRootBlock: false
+    )
+    let block2 = try await SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>(
+      objectNumber: remoteMultiBlock2ONo,
+      role: "Block2",
+      deviceDelegate: device,
+      addToRootBlock: false
+    )
+    let gain1 = try await SwiftOCADevice.OcaGain(
+      objectNumber: remoteMultiGain1ONo,
+      role: "Gain",
+      deviceDelegate: device,
+      addToRootBlock: false
+    )
+    let gain2 = try await SwiftOCADevice.OcaGain(
+      objectNumber: remoteMultiGain2ONo,
+      role: "Gain",
+      deviceDelegate: device,
+      addToRootBlock: false
+    )
+    try await block1.add(actionObject: gain1)
+    try await block2.add(actionObject: gain2)
+    try await container.add(actionObject: block1)
+    try await container.add(actionObject: block2)
+
+    let controlNetwork = try await SwiftOCADevice.OcaControlNetwork(deviceDelegate: device)
+    await _setControlNetworkRunning(controlNetwork)
+
+    var listenAddress = sockaddr_in()
+    listenAddress.sin_family = sa_family_t(AF_INET)
+    listenAddress.sin_addr.s_addr = UInt32(INADDR_LOOPBACK).bigEndian
+    listenAddress.sin_port = port.bigEndian
+    #if canImport(Darwin) || os(FreeBSD) || os(OpenBSD)
+    listenAddress.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+    #endif
+
+    let endpoint = try await Ocp1DeviceEndpoint(
+      address: listenAddress.socketAddressData,
+      device: device
+    )
+
+    let endpointTask = Task {
+      try await endpoint.run()
+    }
+    try await Task.sleep(for: .milliseconds(500))
+
+    return (device, container, gain1, gain2, endpointTask)
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func wholeProfileParamSetSyncsMultipleBlocks() async throws {
+    let port: UInt16 = 12353
+    let serialNumber = "E2EMultiBlock-\(UUID().uuidString)"
+    let modelGUID = Self._randomModelGUID()
+    let (remoteDevice, _container, remoteGain1, remoteGain2, endpointTask) =
+      try await Self._makeMultiBlockRemoteDevice(
+        port: port,
+        serialNumber: serialNumber,
+        modelGUID: modelGUID
+      )
+    defer { endpointTask.cancel() }
+
+    let localDevice = OcaDevice()
+    try await localDevice.initializeDefaultObjects()
+    let connectionOptions = Ocp1ConnectionOptions(
+      flags: [.automaticReconnect, .refreshDeviceTreeOnConnection]
+    )
+    let broker = await OcaConnectionBroker(
+      connectionOptions: connectionOptions,
+      serviceTypes: [],
+      deviceModels: nil
+    )
+    let schema = Self._makeMultiBlockSchema(modelGUID: modelGUID)
+    let coordinator = try await OcaCoordinator(
+      connectionBroker: broker,
+      deviceSchema: schema,
+      deviceDelegate: localDevice
+    )
+
+    let zeroUUID = UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+    let profileONo = try await coordinator.addProfile(schema: "MultiBlock", uuid: zeroUUID)
+    let profile = try await coordinator._findProfile(oNo: profileONo)
+
+    // set local proxy gains to known values
+    let localGain1ONo = try Self.localMultiGain1Mask.objectNumber(for: 1)
+    let localGain2ONo = try Self.localMultiGain2Mask.objectNumber(for: 1)
+    let localGain1: SwiftOCADevice.OcaGain = await localDevice.resolve(
+      objectNumber: localGain1ONo
+    )!
+    let localGain2: SwiftOCADevice.OcaGain = await localDevice.resolve(
+      objectNumber: localGain2ONo
+    )!
+    let testValue1: OcaDB = -6.0
+    let testValue2: OcaDB = -18.0
+    await { @OcaDevice in localGain1.gain.value = testValue1 }()
+    await { @OcaDevice in localGain2.gain.value = testValue2 }()
+
+    // connect to the remote device
+    let deviceIdentifier = OcaConnectionBroker.DeviceIdentifier(
+      serviceType: .tcp,
+      modelGUID: modelGUID,
+      serialNumber: serialNumber,
+      name: "E2E MultiBlock Remote Device"
+    )
+    var remoteAddress = sockaddr_in()
+    remoteAddress.sin_family = sa_family_t(AF_INET)
+    remoteAddress.sin_addr.s_addr = UInt32(INADDR_LOOPBACK).bigEndian
+    remoteAddress.sin_port = port.bigEndian
+    #if canImport(Darwin) || os(FreeBSD) || os(OpenBSD)
+    remoteAddress.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+    #endif
+    let connection = try await Ocp1TCPConnection(
+      deviceAddress: remoteAddress.socketAddressData,
+      options: connectionOptions
+    )
+    try await connection.connect()
+    defer { Task { try? await connection.disconnect() } }
+
+    await broker.register(device: deviceIdentifier, connection: connection)
+    let brokerEventTask = Task { [weak coordinator] in
+      guard let coordinator else { return }
+      for await event in await broker.events {
+        await coordinator.handleConnectionBrokerEvent(event)
+      }
+    }
+    defer { brokerEventTask.cancel() }
+
+    // wait for activation
+    for _ in 0..<20 {
+      let count = await profile.remoteObjectCount(for: deviceIdentifier)
+      if count > 0 { break }
+      try await Task.sleep(for: .milliseconds(250))
+    }
+
+    // allow time for param-set apply to complete
+    try await Task.sleep(for: .seconds(2))
+
+    // verify the param-set path was used
+    let syncCount = await profile.paramSetSyncCount
+    #expect(
+      syncCount > 0,
+      "param-set sync path should have been used, but paramSetSyncCount is \(syncCount)"
+    )
+
+    // both remote gains should have been updated via the single whole-profile blob
+    let remoteValue1 = await remoteGain1.gain.value
+    #expect(
+      remoteValue1 == testValue1,
+      "remote gain 1 should be \(testValue1) via whole-profile param-set, got \(remoteValue1)"
+    )
+    let remoteValue2 = await remoteGain2.gain.value
+    #expect(
+      remoteValue2 == testValue2,
+      "remote gain 2 should be \(testValue2) via whole-profile param-set, got \(remoteValue2)"
+    )
+
+    _ = remoteDevice
+  }
 }
 
 // MARK: - _remapObjectNumbers unit tests

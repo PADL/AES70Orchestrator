@@ -528,13 +528,28 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
       do {
         profile.activatingDevices.insert(deviceIdentifier)
         defer { profile.activatingDevices.remove(deviceIdentifier) }
-        for block in schema.blocks {
-          try await profile.bindRemoteObjects(
+
+        // try applying all blocks as a single param-set blob first
+        var usedWholeProfile = false
+        if paramSetInitialSync, schema.blocks.count > 1 {
+          usedWholeProfile = try await profile.bindAllRemoteObjects(
             to: deviceIdentifier, deviceIndex: index,
-            connection: connection, schema: block
+            connection: connection
           )
-          activatedBlocks.append(block)
         }
+
+        if !usedWholeProfile {
+          for block in schema.blocks {
+            try await profile.bindRemoteObjects(
+              to: deviceIdentifier, deviceIndex: index,
+              connection: connection, schema: block
+            )
+            activatedBlocks.append(block)
+          }
+        } else {
+          activatedBlocks.append(contentsOf: schema.blocks)
+        }
+
         logger.trace("Activated \(profile) for \(deviceIdentifier)")
       } catch {
         logger.warning("Failed to activate \(profile) for \(deviceIdentifier): \(error)")

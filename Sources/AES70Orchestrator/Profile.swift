@@ -20,7 +20,7 @@ import FoundationEssentials
 import Foundation
 #endif
 import Gzip
-import SwiftOCA
+@_spi(SwiftOCAPrivate) import SwiftOCA
 @_spi(SwiftOCAPrivate) import SwiftOCADevice
 import Synchronization
 
@@ -880,16 +880,22 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
       OcaUint64(guid.modelCode.3) << 0
   }
 
-  /// Serialize the local block corresponding to `schema` as a parameter-dataset
-  /// blob suitable for ``SwiftOCA.OcaBlock/apply(parameterData:)``, with `_oNo`
-  /// values remapped from local profile-space to remote device-space and
-  /// properties filtered according to the schema's include/exclude rules.
-  private func _serializeParamSet(
+  /// Serialize local block state as a parameter-dataset blob suitable for
+  /// ``SwiftOCA.OcaBlock/apply(parameterData:)``, with `_oNo` values remapped
+  /// from local profile-space to remote device-space and properties filtered
+  /// according to the schema's include/exclude rules.
+  ///
+  /// When `schema` is provided, only the sub-block corresponding to that
+  /// schema entry is serialized. When `nil`, the entire `proxyBlock` (all
+  /// schema blocks) is serialized as a single blob.
+  func _serializeParamSet(
     for deviceIndex: OcaONo,
-    schema: OcaProfileObjectSchema,
+    schema: OcaProfileObjectSchema? = nil,
+    targetRemoteONo: OcaONo? = nil,
     deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
   ) throws -> OcaLongBlob {
     guard let proxyBlock else { throw Ocp1Error.status(.deviceError) }
+    let profileSchema = try profileSchema
 
     // build local ONo → remote ONo map from ALL blocks in the profile schema
     // so that cross-block reference properties (e.g. VCA group members pointing
@@ -897,13 +903,14 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     var localToRemoteONoVar = [OcaONo: OcaONo]()
     var schemaByLocalONoVar = [OcaONo: OcaProfileObjectSchema]()
 
-    let allBlocks = (try? profileSchema.blocks) ?? [schema]
-    for block in allBlocks {
+    for block in profileSchema.blocks {
       try block.applyRecursive { objectSchema, _, _ in
         guard let localONo = try objectNumber(for: objectSchema.localObjectNumber) else { return }
         let remoteONo = try objectSchema.remoteObjectNumber.objectNumber(for: deviceIndex)
         localToRemoteONoVar[localONo] = remoteONo
-        if block.localObjectNumber == schema.localObjectNumber {
+        // when serializing a single block, only populate schema map for that block;
+        // when serializing the whole profile, populate for all blocks
+        if schema == nil || block.localObjectNumber == schema!.localObjectNumber {
           schemaByLocalONoVar[localONo] = objectSchema
         }
       }
@@ -912,13 +919,19 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     let localToRemoteONo = localToRemoteONoVar
     let schemaByLocalONo = schemaByLocalONoVar
 
-    // find the local container that corresponds to this schema entry
-    guard let localONo = try objectNumber(for: schema.localObjectNumber),
-          let localBlock = proxyBlock.actionObjects
-          .first(where: { $0.objectNumber == localONo }),
-          localBlock is any SwiftOCADevice.OcaBlockContainer
-    else {
-      throw Ocp1Error.status(.deviceError)
+    // determine the local block to serialize
+    let localBlock: SwiftOCADevice.OcaRoot
+    if let schema {
+      guard let localONo = try objectNumber(for: schema.localObjectNumber),
+            let block = proxyBlock.actionObjects
+            .first(where: { $0.objectNumber == localONo }),
+            block is any SwiftOCADevice.OcaBlockContainer
+      else {
+        throw Ocp1Error.status(.deviceError)
+      }
+      localBlock = block
+    } else {
+      localBlock = proxyBlock
     }
 
     let lockStatePropertyID = OcaPropertyID("1.6")
@@ -970,14 +983,35 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     }
     jsonObject = remapped
 
-    // reorder action objects to match schema order so that objects with
-    // side effects (e.g. VCA assignments) are applied before dependent objects
-    try Self._reorderActionObjects(
-      in: &jsonObject,
-      schema: schema,
-      localToRemoteONo: localToRemoteONo,
-      objectNumberForLocal: { try objectNumber(for: $0) }
-    )
+    // reorder action objects to match schema order
+    if let schema {
+      try Self._reorderActionObjects(
+        in: &jsonObject,
+        schema: schema,
+        localToRemoteONo: localToRemoteONo,
+        objectNumberForLocal: { try objectNumber(for: $0) }
+      )
+    } else {
+      // whole-profile: reorder within each top-level block
+      if var actionArray = jsonObject["3.2"] as? [[String: any Sendable]] {
+        for i in actionArray.indices {
+          let childONo = actionArray[i]["_oNo"] as? OcaONo ?? 0
+          if let blockSchema = profileSchema.blocks.first(where: { blockSchema in
+            guard let mask = blockSchema.localObjectNumber else { return false }
+            return (try? objectNumber(for: mask))
+              .flatMap { localToRemoteONo[$0] } == childONo
+          }), blockSchema.isContainer {
+            try Self._reorderActionObjects(
+              in: &actionArray[i],
+              schema: blockSchema,
+              localToRemoteONo: localToRemoteONo,
+              objectNumberForLocal: { try objectNumber(for: $0) }
+            )
+          }
+        }
+        jsonObject["3.2"] = actionArray
+      }
+    }
 
     #if DEBUG
     if let debugData = try? JSONSerialization.data(
@@ -986,11 +1020,17 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     ),
       let debugString = String(data: debugData, encoding: .utf8)
     {
+      let label = schema?.role ?? "whole-profile"
       coordinator?.logger.trace(
-        "bindRemoteObjects: param-set JSON for \(schema.role):\n\(debugString)"
+        "bindRemoteObjects: param-set JSON for \(label):\n\(debugString)"
       )
     }
     #endif
+
+    // when applying to a specific remote container, rewrite the top-level ONo
+    if let targetRemoteONo {
+      jsonObject["_oNo"] = targetRemoteONo
+    }
 
     // add parameter-dataset metadata expected by the remote device
     jsonObject["_version"] = OcaUint32(1)
@@ -1005,9 +1045,10 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     to deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier,
     deviceIndex: OcaONo,
     connection: Ocp1Connection,
-    schema: OcaProfileObjectSchema
+    schema: OcaProfileObjectSchema,
+    skipParamSet: Bool = false
   ) async throws {
-    let paramSetInitialSync = coordinator?.paramSetInitialSync ?? false
+    let paramSetInitialSync = !skipParamSet && (coordinator?.paramSetInitialSync ?? false)
 
     // Flatten the schema tree so we can resolve remote objects concurrently.
     var entries = [OcaProfileObjectSchema]()
@@ -1123,6 +1164,69 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     for (binding, _) in resolvedBindings {
       try await binding.subscribe(to: deviceIdentifier)
     }
+  }
+
+  /// Apply all profile blocks as a single param-set blob to the remote
+  /// profile container block, then bind and subscribe per-block objects.
+  /// Returns `true` if the whole-profile param-set path succeeded, or
+  /// `false` if the caller should fall back to per-block activation.
+  func bindAllRemoteObjects(
+    to deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier,
+    deviceIndex: OcaONo,
+    connection: Ocp1Connection
+  ) async throws -> Bool {
+    guard proxyBlock != nil else { return false }
+    let schema = try profileSchema
+
+    // serialize the entire proxy block and apply to the remote container
+    do {
+      // find the remote container by looking up the owner of the first sub-block
+      let firstRemoteONo = try schema.blocks[0].remoteObjectNumber
+        .objectNumber(for: deviceIndex)
+      guard let firstRemoteBlock = try await connection.resolve(
+        objectOfUnknownClass: firstRemoteONo
+      ) as? SwiftOCA.OcaBlock else {
+        return false
+      }
+      let containerONo: OcaONo = try await firstRemoteBlock.$owner._getValue(
+        firstRemoteBlock,
+        flags: [.returnCachedValue, .cacheValue]
+      )
+      guard let remoteContainer = try await connection.resolve(
+        objectOfUnknownClass: containerONo
+      ) as? SwiftOCA.OcaBlock else {
+        return false
+      }
+
+      let blob = try _serializeParamSet(
+        for: deviceIndex,
+        targetRemoteONo: containerONo,
+        deviceIdentifier: deviceIdentifier
+      )
+
+      coordinator?.logger.debug(
+        "bindAllRemoteObjects: applying whole-profile param-set blob (\(blob.count) bytes) to remote container \(containerONo.oNoString) on \(deviceIdentifier)"
+      )
+      try await remoteContainer.apply(parameterData: blob)
+    } catch {
+      coordinator?.logger.warning(
+        "bindAllRemoteObjects: whole-profile param-set failed on \(deviceIdentifier): \(error), falling back to per-block activation"
+      )
+      return false
+    }
+
+    // param-set succeeded — now bind and subscribe all blocks (skip per-block param-set)
+    for block in schema.blocks {
+      try await bindRemoteObjects(
+        to: deviceIdentifier,
+        deviceIndex: deviceIndex,
+        connection: connection,
+        schema: block,
+        skipParamSet: true
+      )
+    }
+    paramSetSyncCount += 1
+    return true
   }
 
   func unbindRemoteObjects(

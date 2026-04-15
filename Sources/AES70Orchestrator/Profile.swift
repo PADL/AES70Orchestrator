@@ -1129,21 +1129,36 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
 
     // serialize the entire proxy block and apply to the remote container
     do {
-      // find the remote container by looking up the owner of the first sub-block
-      let firstRemoteONo = try schema.blocks[0].remoteObjectNumber
-        .objectNumber(for: deviceIndex)
-      guard let firstRemoteBlock = try await connection.resolve(
-        objectOfUnknownClass: firstRemoteONo
-      ) as? SwiftOCA.OcaBlock else {
-        return false
+      // resolve all top-level blocks and verify they share the same owner
+      var containerONo: OcaONo?
+      for block in schema.blocks {
+        let remoteONo = try block.remoteObjectNumber.objectNumber(for: deviceIndex)
+        guard let remoteBlock = try await connection.resolve(
+          objectOfUnknownClass: remoteONo
+        ) as? SwiftOCA.OcaBlock else {
+          return false
+        }
+        let ownerONo: OcaONo = try await remoteBlock.$owner._getValue(
+          remoteBlock,
+          flags: [.returnCachedValue, .cacheValue]
+        )
+        if let existing = containerONo {
+          guard existing == ownerONo else {
+            coordinator?.logger.debug(
+              "bindAllRemoteObjects: top-level blocks have different owners, falling back to per-block activation"
+            )
+            return false
+          }
+        } else {
+          containerONo = ownerONo
+        }
       }
-      let containerONo: OcaONo = try await firstRemoteBlock.$owner._getValue(
-        firstRemoteBlock,
-        flags: [.returnCachedValue, .cacheValue]
-      )
-      guard let remoteContainer = try await connection.resolve(
-        objectOfUnknownClass: containerONo
-      ) as? SwiftOCA.OcaBlock else {
+
+      guard let containerONo,
+            let remoteContainer = try await connection.resolve(
+              objectOfUnknownClass: containerONo
+            ) as? SwiftOCA.OcaBlock
+      else {
         return false
       }
 
@@ -1185,10 +1200,17 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
   ) async {
     let bindings = Array(objectBindings.values)
 
+    let logger = coordinator?.logger
     await withDiscardingTaskGroup { group in
       for binding in bindings {
         group.addTask {
-          try? await binding.unbind(from: deviceIdentifier)
+          do {
+            try await binding.unbind(from: deviceIdentifier)
+          } catch {
+            logger?.debug(
+              "unbindAllRemoteObjects: failed to unbind from \(deviceIdentifier): \(error)"
+            )
+          }
         }
       }
     }

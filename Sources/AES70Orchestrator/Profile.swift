@@ -916,9 +916,7 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     var jsonObject = try localBlock.serialize(flags: [.ignoreEncodingErrors], filter: filter)
 
     // remap _oNo values and reference property ONos from local to remote space
-    let referencePropertyIDs = (try? Self._referencePropertyIDsByClassID(
-      from: profileSchema
-    )) ?? [:]
+    let referencePropertyIDs = Self._referencePropertyIDsByClassID(from: profileSchema)
     guard let remapped = Self._remapObjectNumbers(
       in: jsonObject,
       referencePropertyIDs: referencePropertyIDs,

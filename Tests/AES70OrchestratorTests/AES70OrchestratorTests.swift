@@ -1149,6 +1149,79 @@ struct PersistenceTests {
   }
 
   @Test
+  func blobSaveAndLoadPreservesInvalidReferenceONo() async throws {
+    // Regression for the proxy-block serialization sentinel colliding with
+    // OcaInvalidONo: a reference property holding OcaInvalidONo (0) must
+    // round-trip as 0, not be rewritten to the proxy block's object number.
+    let modelGUID = OcaModelGUID(
+      mfrCode: .init((0xE2, 0xE2, 0xE2)),
+      modelCode: (
+        UInt8.random(in: 1...255),
+        UInt8.random(in: 0...255),
+        UInt8.random(in: 0...255),
+        UInt8.random(in: 0...255)
+      )
+    )
+    try? await OcaDeviceClassRegistry.shared.register(_ReferenceScalarDeviceObject.self)
+    try? await OcaClassRegistry.shared.register(_ReferenceScalarProxyObject.self)
+
+    let localDevice = OcaDevice()
+    try await localDevice.initializeDefaultObjects()
+    let broker = await OcaConnectionBroker(
+      connectionOptions: Ocp1ConnectionOptions(flags: [
+        .automaticReconnect,
+        .refreshDeviceTreeOnConnection,
+      ]),
+      serviceTypes: [],
+      deviceModels: nil
+    )
+    let coordinator = try await OcaCoordinator(
+      connectionBroker: broker,
+      deviceSchema: EndToEndTests._makeReferenceSchema(modelGUID: modelGUID),
+      deviceDelegate: localDevice
+    )
+
+    let profileONo = try await coordinator.addProfile(schema: "E2EReferences")
+    let profile = try await coordinator._findProfile(oNo: profileONo)
+
+    let localScalar: _ReferenceScalarDeviceObject = try await localDevice.resolve(
+      objectNumber: EndToEndTests.localReferenceScalarONo
+    )!
+
+    // explicitly hold "no reference"
+    await { @OcaDevice in localScalar.target = OcaInvalidONo }()
+
+    let blob = try await coordinator.export()
+
+    let restoredDevice = OcaDevice()
+    try await restoredDevice.initializeDefaultObjects()
+    let restoredBroker = await OcaConnectionBroker(
+      connectionOptions: Ocp1ConnectionOptions(flags: [
+        .automaticReconnect,
+        .refreshDeviceTreeOnConnection,
+      ]),
+      serviceTypes: [],
+      deviceModels: nil
+    )
+    let restoredCoordinator = try await OcaCoordinator(
+      connectionBroker: restoredBroker,
+      deviceSchema: EndToEndTests._makeReferenceSchema(modelGUID: modelGUID),
+      deviceDelegate: restoredDevice
+    )
+
+    try await restoredCoordinator.import(from: blob)
+
+    let restoredProfile = try await restoredCoordinator._findProfile(oNo: profile.objectNumber)
+    let restoredScalar: _ReferenceScalarDeviceObject = try await restoredDevice.resolve(
+      objectNumber: EndToEndTests.localReferenceScalarONo
+    )!
+
+    // must remain "no reference", NOT the proxy block's object number
+    #expect(await restoredScalar.target == OcaInvalidONo)
+    #expect(await restoredScalar.target != restoredProfile.proxyBlock?.objectNumber)
+  }
+
+  @Test
   func blobSaveAndLoadRemapsObjectReferencesWhenProfileIndexChanges() async throws {
     let modelGUID = OcaModelGUID(
       mfrCode: .init((0xE2, 0xE2, 0xE2)),

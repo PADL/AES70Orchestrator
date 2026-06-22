@@ -52,6 +52,12 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
   private nonisolated static let _actionObjectsPropertyID = OcaPropertyID("3.2")
   private nonisolated static let _ownerPropertyID = OcaPropertyID("2.4")
 
+  /// Sentinel used in serialized state to stand in for the (instance-specific)
+  /// proxy block object number. Must be a value that is never a legitimate ONo —
+  /// in particular it must differ from `OcaInvalidONo` (0), so that a reference
+  /// property genuinely holding "no reference" survives a save/load round-trip.
+  private nonisolated static let _proxyBlockSentinelONo: OcaONo = .max
+
   override public class var classID: OcaClassID { OcaClassID(
     parent: super.classID,
     authority: PADLCompanyID,
@@ -536,9 +542,11 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     proxyBlockONo: OcaONo,
     toMasked: Bool
   ) -> OcaONo {
-    if oNo == proxyBlockONo || (!toMasked && oNo == 0) {
-      // proxy block: use sentinel 0 when serializing, restore actual on deserialize
-      return toMasked ? OcaONo(0) : proxyBlockONo
+    if oNo == proxyBlockONo || (!toMasked && oNo == Self._proxyBlockSentinelONo) {
+      // proxy block: use a reserved sentinel when serializing, restore actual on
+      // deserialize. The sentinel is distinct from OcaInvalidONo so a genuine
+      // "no reference" (0) is not rewritten to the proxy block's object number.
+      return toMasked ? Self._proxyBlockSentinelONo : proxyBlockONo
     }
 
     if toMasked, let mask = oNoMap[oNo] {

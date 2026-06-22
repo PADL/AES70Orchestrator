@@ -196,9 +196,15 @@ extension OcaCoordinator {
 
   public func export(to url: URL) async throws {
     let tempURL = url.appendingPathExtension(UUID().uuidString)
-    let archive = try Archive(url: tempURL, accessMode: .create)
-    try await _save(to: archive)
-    _ = try FileManager.default.replaceItemAt(url, withItemAt: tempURL)
+    do {
+      let archive = try Archive(url: tempURL, accessMode: .create)
+      try await _save(to: archive)
+      _ = try FileManager.default.replaceItemAt(url, withItemAt: tempURL)
+    } catch {
+      // don't leave a partial temp archive behind on failure
+      try? FileManager.default.removeItem(at: tempURL)
+      throw error
+    }
     logger.debug("Saved state to \(url.path)")
   }
 

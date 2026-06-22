@@ -61,7 +61,7 @@ Each object in the schema specifies:
 
 When using the mapping form for a profile, the following options are available:
 
-- **`autobind`** — if `true`, profiles of this schema are automatically bound to all discovered devices and cannot be manually bound/unbound. Defaults to `false`.
+- **`autobind`** — if `true`, the coordinator automatically creates a single profile of this schema at startup and binds it to every discovered device. Such profiles cannot be manually created (`addProfile` is rejected), bound, or unbound. Defaults to `false`.
 
 ```yaml
 profiles:
@@ -96,6 +96,8 @@ The profile's label is synchronised from its proxy block — set the label on th
 ## Persistence
 
 State can be saved to and loaded from ZIP archives (file-based or in-memory `OcaLongBlob`). The archive contains a JSON manifest of profiles and their device bindings, plus serialised parameter datasets for each profile's proxy block. State export/import is also accessible over OCP.1.
+
+`import(from:clearExisting:)` defaults to **replace-all** (`clearExisting: true`): existing profiles are deleted before the archive is loaded. Pass `clearExisting: false` to **merge** instead, skipping any profile whose UUID already exists. The OCP.1 import method always uses replace-all.
 
 ## Dependencies
 

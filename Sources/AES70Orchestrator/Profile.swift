@@ -87,13 +87,18 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     0
   ))
 
+  /// The UUID assigned to automatically-bound profiles. A schema marked
+  /// `autobind` has a single profile created with this UUID at coordinator init.
+  nonisolated static let automaticBindingUUID = _zeroUUID
+
   nonisolated var uuid: UUID {
     UUID(uuidString: role) ?? Self._zeroUUID
   }
 
-  /// A profile with a zero UUID is automatically bound to all discovered devices.
+  /// A profile with the ``automaticBindingUUID`` is automatically bound to all
+  /// discovered devices and cannot be manually bound or unbound.
   nonisolated var isAutomaticallyBound: Bool {
-    uuid == Self._zeroUUID
+    uuid == Self.automaticBindingUUID
   }
 
   override public nonisolated var description: String {

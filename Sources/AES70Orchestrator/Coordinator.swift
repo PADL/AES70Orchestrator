@@ -223,6 +223,7 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
     _nextProfileONo = baseONo
     await device.setEventDelegate(self)
     _startEventMonitor()
+    try await _ensureAutobindProfiles()
     logger.debug("Coordinator initialized with schemas: \(deviceSchema.profileSchemas.map(\.name))")
   }
 
@@ -374,8 +375,22 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
     return schema
   }
 
+  /// Create a profile for a manually-managed schema. Profiles for `autobind`
+  /// schemas are created and managed automatically and cannot be added this way.
   @discardableResult
   public func addProfile(
+    schema: String,
+    name: String? = nil,
+    uuid: UUID? = nil
+  ) async throws -> OcaONo {
+    guard try !profileSchema(named: schema).autobind else {
+      throw OcaCoordinatorError.profileAutomaticallyBound
+    }
+    return try await _addProfile(schema: schema, name: name, uuid: uuid)
+  }
+
+  @discardableResult
+  func _addProfile(
     schema: String,
     name: String? = nil,
     uuid: UUID? = nil
@@ -399,6 +414,30 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
     )
     logger.debug("Added \(profile)")
     return profile.objectNumber
+  }
+
+  /// Ensure every `autobind` schema has its single automatically-bound profile.
+  /// Called after initialization and after importing state. Idempotent: a schema
+  /// that already has a profile is left untouched.
+  func _ensureAutobindProfiles() async throws {
+    for schema in deviceSchema.profileSchemas where schema.autobind {
+      let entry = try _schemaEntry(for: schema.name)
+      guard entry.profiles.actionObjects.isEmpty else { continue }
+      // reuse the zero-UUID mechanism: a profile with the automatic-binding UUID
+      // is bound to every discovered device (see OcaProfile.isAutomaticallyBound)
+      _ = try await _addProfile(schema: schema.name, uuid: OcaProfile.automaticBindingUUID)
+      logger.debug("Created automatically-bound profile for schema \(schema.name)")
+    }
+  }
+
+  /// Delete every profile across all schemas, unbinding and deregistering their
+  /// local objects. Used by `import(clearExisting:)` for replace-all semantics.
+  func _deleteAllProfiles() async throws {
+    for entry in _schemaEntries.values {
+      for profile in Array(entry.profiles.actionObjects) {
+        try await _deleteProfile(profile)
+      }
+    }
   }
 
   func _findProfile(oNo: OcaONo) throws -> OcaProfile {

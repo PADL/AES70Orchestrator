@@ -296,12 +296,18 @@ public final class OcaProfileSchema: Sendable, CustomStringConvertible {
   public let name: String
   public let blocks: [OcaProfileObjectSchema]
 
+  /// When `true`, the coordinator automatically creates a single profile of this
+  /// schema and binds it to every discovered device. Such profiles cannot be
+  /// manually bound or unbound.
+  public let autobind: Bool
+
   public var description: String {
-    "OcaProfileSchema(name: \(name), blocks: \(blocks.count))"
+    "OcaProfileSchema(name: \(name), blocks: \(blocks.count), autobind: \(autobind))"
   }
 
-  public init(name: String, blocks: [OcaProfileObjectSchema]) {
+  public init(name: String, blocks: [OcaProfileObjectSchema], autobind: Bool = false) {
     self.name = name
     self.blocks = blocks
+    self.autobind = autobind
   }
 }

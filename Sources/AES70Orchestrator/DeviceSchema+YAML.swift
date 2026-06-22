@@ -183,6 +183,7 @@ extension OcaDeviceSchema {
     }
 
     let blockSequence: Node.Sequence
+    var autobind = false
 
     if let sequence = valueNode.sequence {
       blockSequence = sequence
@@ -192,6 +193,7 @@ extension OcaDeviceSchema {
           .schemaParseError("profile '\(name)' mapping must contain 'blocks' sequence")
       }
       blockSequence = seq
+      autobind = valueMapping["autobind"]?.bool ?? false
     } else {
       throw OcaCoordinatorError
         .schemaParseError("profile '\(name)' value must be a sequence of blocks or a mapping")
@@ -201,7 +203,7 @@ extension OcaDeviceSchema {
     for node in blockSequence {
       try blocks.append(_parseObjectSchema(node))
     }
-    return OcaProfileSchema(name: name, blocks: blocks)
+    return OcaProfileSchema(name: name, blocks: blocks, autobind: autobind)
   }
 
   @OcaDevice

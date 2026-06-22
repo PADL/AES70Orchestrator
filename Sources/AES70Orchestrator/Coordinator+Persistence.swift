@@ -111,8 +111,12 @@ extension OcaCoordinator {
     }
   }
 
-  private func _load(from archive: Archive) async throws {
+  private func _load(from archive: Archive, clearExisting: Bool) async throws {
     let decoder = JSONDecoder()
+
+    if clearExisting {
+      try await _deleteAllProfiles()
+    }
 
     for (schemaName, _) in _schemaEntries {
       // read manifest
@@ -134,7 +138,13 @@ extension OcaCoordinator {
           logger.warning("load: invalid UUID \(uuidString)")
           continue
         }
-        let profileONo = try await addProfile(schema: schemaName, name: entry.name, uuid: uuid)
+        // merge mode (clearExisting == false): skip profiles that already exist
+        // rather than aborting the whole load on a uniqueness conflict
+        if !clearExisting, (try? findProfile(uuid: uuid)) != nil {
+          logger.debug("load: skipping already-present profile \(uuidString)")
+          continue
+        }
+        let profileONo = try await _addProfile(schema: schemaName, name: entry.name, uuid: uuid)
         let profile = try _findProfile(oNo: profileONo)
 
         // restore profile state before binding so local objects have their
@@ -179,6 +189,9 @@ extension OcaCoordinator {
         logger.trace("Loaded profile \(uuidString) for schema \(schemaName)")
       }
     }
+
+    // recreate any automatically-bound profiles not present in the archive
+    try await _ensureAutobindProfiles()
   }
 
   public func export(to url: URL) async throws {
@@ -189,9 +202,12 @@ extension OcaCoordinator {
     logger.debug("Saved state to \(url.path)")
   }
 
-  public func `import`(from url: URL) async throws {
+  /// Import state from a ZIP archive on disk. When `clearExisting` is `true`
+  /// (the default), all existing profiles are deleted first (replace-all).
+  /// When `false`, profiles whose UUID already exists are skipped (merge).
+  public func `import`(from url: URL, clearExisting: Bool = true) async throws {
     let archive = try Archive(url: url, accessMode: .read)
-    try await _load(from: archive)
+    try await _load(from: archive, clearExisting: clearExisting)
     logger.debug("Loaded state from \(url.path)")
   }
 
@@ -207,9 +223,12 @@ extension OcaCoordinator {
     return blob
   }
 
-  public func `import`(from blob: OcaLongBlob) async throws {
+  /// Import state from an in-memory ZIP archive blob. When `clearExisting` is
+  /// `true` (the default), all existing profiles are deleted first (replace-all).
+  /// When `false`, profiles whose UUID already exists are skipped (merge).
+  public func `import`(from blob: OcaLongBlob, clearExisting: Bool = true) async throws {
     let archive = try Archive(data: blob.wrappedValue, accessMode: .read)
-    try await _load(from: archive)
+    try await _load(from: archive, clearExisting: clearExisting)
     logger.debug("Loaded state from blob (\(blob.wrappedValue.count) bytes)")
   }
 }

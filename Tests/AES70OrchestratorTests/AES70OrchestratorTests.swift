@@ -593,6 +593,39 @@ struct CoordinatorTests {
     )
   }
 
+  /// A device schema with a single `autobind` profile schema, for autobind tests.
+  static func _makeAutobindSchema() -> OcaDeviceSchema {
+    let autoSchema = OcaProfileObjectSchema(
+      role: "AutoGain",
+      type: SwiftOCADevice.OcaGain.self,
+      localObjectNumber: OcaONoMask(oNo: 0x5000, mask: 0x0F),
+      remoteObjectNumber: OcaONoMask(oNo: 0x500, mask: 0x03)
+    )
+    let autoProfileSchema = OcaProfileSchema(
+      name: "AutoProfile",
+      blocks: [autoSchema],
+      autobind: true
+    )
+    return OcaDeviceSchema(name: "AutobindDevice", profileSchemas: [autoProfileSchema])
+  }
+
+  @OcaDevice
+  static func _makeAutobindCoordinator() async throws -> (OcaCoordinator, OcaDevice) {
+    let device = OcaDevice()
+    try await device.initializeDefaultObjects()
+    let broker = await OcaConnectionBroker(
+      connectionOptions: .init(),
+      serviceTypes: nil,
+      deviceModels: nil
+    )
+    let coordinator = try await OcaCoordinator(
+      connectionBroker: broker,
+      deviceSchema: _makeAutobindSchema(),
+      deviceDelegate: device
+    )
+    return (coordinator, device)
+  }
+
   @OcaDevice
   static func _makeCoordinator() async throws -> (OcaCoordinator, OcaDevice) {
     let device = OcaDevice()
@@ -877,16 +910,24 @@ struct CoordinatorTests {
     }
   }
 
-  static let _zeroUUID = UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+  @Test
+  func autobindSchemaCreatesProfileAutomatically() async throws {
+    let (coordinator, _device) = try await Self._makeAutobindCoordinator()
+    // an autobind schema gets exactly one auto-created profile at init
+    let info: (count: Int, isAuto: Bool) = await { @OcaDevice in
+      let profiles = coordinator._schemaEntries["AutoProfile"]?.profiles.actionObjects ?? []
+      return (profiles.count, profiles.first?.isAutomaticallyBound ?? false)
+    }()
+    #expect(info.count == 1)
+    #expect(info.isAuto == true)
+  }
 
   @Test
   func autobindRejectsManualBind() async throws {
-    let (coordinator, _device) = try await Self._makeCoordinator()
-    let oNo = try await coordinator.addProfile(
-      schema: "ChannelStrip",
-      uuid: Self._zeroUUID
-    )
-    let profile = try await coordinator._findProfile(oNo: oNo)
+    let (coordinator, _device) = try await Self._makeAutobindCoordinator()
+    let profile = try #require(await { @OcaDevice in
+      coordinator._schemaEntries["AutoProfile"]?.profiles.actionObjects.first
+    }())
 
     await #expect(throws: OcaCoordinatorError.self) {
       try await coordinator.bindProfile(profile, to: Self._testDeviceIdentifier)
@@ -897,17 +938,11 @@ struct CoordinatorTests {
   }
 
   @Test
-  func autobindEnforcesSingleProfile() async throws {
-    let (coordinator, _device) = try await Self._makeCoordinator()
-    _ = try await coordinator.addProfile(
-      schema: "ChannelStrip",
-      uuid: Self._zeroUUID
-    )
+  func autobindSchemaRejectsManualAdd() async throws {
+    let (coordinator, _device) = try await Self._makeAutobindCoordinator()
+    // profiles for an autobind schema are auto-managed; manual creation is rejected
     await #expect(throws: OcaCoordinatorError.self) {
-      try await coordinator.addProfile(
-        schema: "ChannelStrip",
-        uuid: Self._zeroUUID
-      )
+      try await coordinator.addProfile(schema: "AutoProfile")
     }
   }
 }
@@ -979,6 +1014,47 @@ struct PersistenceTests {
     // load into fresh coordinator — should succeed with no profiles
     let (coordinator2, _device2) = try await CoordinatorTests._makeCoordinator()
     try await coordinator2.import(from: tempURL)
+  }
+
+  @Test
+  func importReplaceAllRemovesPreexistingProfiles() async throws {
+    let (coordinator, _device) = try await CoordinatorTests._makeCoordinator()
+    _ = try await coordinator.addProfile(schema: "ChannelStrip", name: "Saved", uuid: UUID())
+
+    let tempURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent(UUID().uuidString + ".zip")
+    defer { try? FileManager.default.removeItem(at: tempURL) }
+    try await coordinator.export(to: tempURL)
+
+    // a fresh coordinator with a different, pre-existing profile
+    let (coordinator2, _device2) = try await CoordinatorTests._makeCoordinator()
+    _ = try await coordinator2.addProfile(schema: "SimpleSwitch", name: "Stale", uuid: UUID())
+
+    // replace-all (default) drops "Stale" and loads "Saved"
+    try await coordinator2.import(from: tempURL)
+    _ = try await coordinator2.findProfile(named: "Saved", schema: "ChannelStrip")
+    await #expect(throws: OcaCoordinatorError.self) {
+      try await coordinator2.findProfile(named: "Stale", schema: "SimpleSwitch")
+    }
+  }
+
+  @Test
+  func importMergeKeepsPreexistingProfiles() async throws {
+    let (coordinator, _device) = try await CoordinatorTests._makeCoordinator()
+    _ = try await coordinator.addProfile(schema: "ChannelStrip", name: "Saved", uuid: UUID())
+
+    let tempURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent(UUID().uuidString + ".zip")
+    defer { try? FileManager.default.removeItem(at: tempURL) }
+    try await coordinator.export(to: tempURL)
+
+    let (coordinator2, _device2) = try await CoordinatorTests._makeCoordinator()
+    _ = try await coordinator2.addProfile(schema: "SimpleSwitch", name: "Kept", uuid: UUID())
+
+    // merge keeps "Kept" and adds "Saved"
+    try await coordinator2.import(from: tempURL, clearExisting: false)
+    _ = try await coordinator2.findProfile(named: "Saved", schema: "ChannelStrip")
+    _ = try await coordinator2.findProfile(named: "Kept", schema: "SimpleSwitch")
   }
 
   @Test
@@ -1534,6 +1610,34 @@ struct YAMLSchemaTests {
     let model = schema.models![0]
     #expect(model.mfrCode == OcaOrganizationID((0x0A, 0xE9, 0x1B)))
     #expect(model.modelCode == (0x00, 0x01, 0x01, 0x00))
+  }
+
+  @Test
+  func parseAutobindFlag() async throws {
+    let yaml = """
+    device:
+      name: AutoDevice
+      profiles:
+        - AutoProfile:
+            autobind: true
+            blocks:
+              - Gain:
+                  classID: \(SwiftOCADevice.OcaGain.classID)
+                  classVersion: \(SwiftOCADevice.OcaGain.classVersion)
+                  match: 0x00000200/0x0000000F
+        - ManualProfile:
+            - Gain:
+                classID: \(SwiftOCADevice.OcaGain.classID)
+                classVersion: \(SwiftOCADevice.OcaGain.classVersion)
+                match: 0x00000300/0x0000000F
+    """
+    let schema = try await OcaDeviceSchema(yaml: yaml)
+    let auto = try #require(schema.profileSchemas.first { $0.name == "AutoProfile" })
+    let manual = try #require(schema.profileSchemas.first { $0.name == "ManualProfile" })
+    #expect(auto.autobind == true)
+    #expect(auto.blocks.count == 1)
+    // sequence-form profiles default to autobind == false
+    #expect(manual.autobind == false)
   }
 
   @Test

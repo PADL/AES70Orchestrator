@@ -118,7 +118,7 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
   )
   public var mostRecentEventTime = OcaTime()
 
-  public let events: AsyncStream<SwiftOCA.OcaEvent>
+  private let events: AsyncStream<SwiftOCA.OcaEvent>
 
   public private(set) var persistenceURL: URL?
   public func setPersistenceURL(_ url: URL?) { persistenceURL = url }
@@ -182,7 +182,9 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
     self.deviceSchema = deviceSchema
     self.connectionBroker = connectionBroker
     self.logger = logger
-    let (stream, continuation) = AsyncStream<SwiftOCA.OcaEvent>.makeStream()
+    let (stream, continuation) = AsyncStream<SwiftOCA.OcaEvent>.makeStream(
+      bufferingPolicy: .bufferingNewest(1)
+    )
     events = stream
     _eventsContinuation = continuation
     _profilesBlock = try await .init(

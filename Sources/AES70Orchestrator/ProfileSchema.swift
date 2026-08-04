@@ -291,6 +291,70 @@ public struct OcaProfileObjectSchema: Sendable, CustomStringConvertible {
   }
 }
 
+/// Remapping of object numbers within a serialized parameter dataset, between
+/// the profile-local and device-remote object number spaces.
+///
+/// Both the orchestrator and any controller that manipulates a profile's
+/// serialized parameter data (to make it portable between profiles, say) need
+/// this, so it lives here rather than being reimplemented by each.
+public enum OcaProfileParameterDataset {
+  /// Recursively rewrite every `_oNo` value, and the object references held by
+  /// reference properties, using `transform`.
+  ///
+  /// Reference properties are identified by matching an object's `_classID`
+  /// against `referencePropertyIDs` — see
+  /// ``OcaProfileSchema/referencePropertyIDsByClassID``. Without that lookup,
+  /// only `_oNo` values are rewritten.
+  public static func remapObjectNumbers(
+    in jsonObject: Any,
+    referencePropertyIDs: [String: Set<String>] = [:],
+    transform: (OcaONo) -> OcaONo
+  ) -> Any {
+    if let dict = jsonObject as? [String: Any] {
+      var result = [String: Any]()
+      let classID = dict["_classID"] as? String
+      let referenceProperties = classID.flatMap { referencePropertyIDs[$0] } ?? []
+      for (key, value) in dict {
+        if key == "_oNo", let oNo = value as? OcaONo {
+          result[key] = transform(oNo)
+        } else if referenceProperties.contains(key) {
+          result[key] = _remapReferenceValue(value, transform: transform)
+        } else {
+          result[key] = remapObjectNumbers(
+            in: value,
+            referencePropertyIDs: referencePropertyIDs,
+            transform: transform
+          )
+        }
+      }
+      return result
+    } else if let array = jsonObject as? [Any] {
+      return array.map {
+        remapObjectNumbers(
+          in: $0,
+          referencePropertyIDs: referencePropertyIDs,
+          transform: transform
+        )
+      }
+    }
+    return jsonObject
+  }
+
+  /// Remap the object numbers held by a reference property value, which may be
+  /// a scalar object number or an array of them.
+  private static func _remapReferenceValue(
+    _ value: Any,
+    transform: (OcaONo) -> OcaONo
+  ) -> Any {
+    if let oNos = value as? [OcaONo] {
+      return oNos.map(transform)
+    } else if let oNo = value as? OcaONo {
+      return transform(oNo)
+    }
+    return value
+  }
+}
+
 /// A named profile schema consisting of one or more top-level block definitions.
 public final class OcaProfileSchema: Sendable, CustomStringConvertible {
   public let name: String
@@ -309,5 +373,29 @@ public final class OcaProfileSchema: Sendable, CustomStringConvertible {
     self.name = name
     self.blocks = blocks
     self.autobind = autobind
+  }
+
+  /// Maps each class ID in the schema to the property IDs that are reference
+  /// properties — those whose payload holds object numbers needing remapping
+  /// when parameter data crosses between object number spaces.
+  public var referencePropertyIDsByClassID: [String: Set<String>] {
+    var result = [String: Set<String>]()
+    for block in blocks {
+      block.applyRecursive { objectSchema, _, _ in
+        guard !objectSchema.referenceProperties.isEmpty else { return }
+        let classID = (objectSchema.declaredClassID ?? objectSchema.type.classID).description
+        for propertyID in objectSchema.referenceProperties.keys {
+          result[classID, default: []].insert(propertyID.description)
+        }
+      }
+    }
+    return result
+  }
+
+  /// The object number mask used for profile-local objects, if the schema
+  /// declares one. Clearing these bits from a local object number yields a
+  /// profile-independent object number.
+  public var localObjectNumberMask: OcaONo? {
+    blocks.first(where: { $0.localObjectNumber != nil })?.localObjectNumber?.mask
   }
 }

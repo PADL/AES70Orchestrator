@@ -763,17 +763,7 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
   nonisolated static func _referencePropertyIDsByClassID(
     from schema: OcaProfileSchema
   ) -> [String: Set<String>] {
-    var result = [String: Set<String>]()
-    for block in schema.blocks {
-      block.applyRecursive { objectSchema, _, _ in
-        guard !objectSchema.referenceProperties.isEmpty else { return }
-        let classID = (objectSchema.declaredClassID ?? objectSchema.type.classID).description
-        for propID in objectSchema.referenceProperties.keys {
-          result[classID, default: []].insert(propID.description)
-        }
-      }
-    }
-    return result
+    schema.referencePropertyIDsByClassID
   }
 
   /// Recursively remap all `_oNo` values and reference property ONo values in a
@@ -784,47 +774,11 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     referencePropertyIDs: [String: Set<String>] = [:],
     transform: (OcaONo) -> OcaONo
   ) -> Any {
-    if let dict = jsonObject as? [String: Any] {
-      var result = [String: Any]()
-      let classID = dict["_classID"] as? String
-      let refProps = classID.flatMap { referencePropertyIDs[$0] } ?? []
-      for (key, value) in dict {
-        if key == "_oNo", let oNo = value as? OcaONo {
-          result[key] = transform(oNo)
-        } else if refProps.contains(key) {
-          result[key] = _remapReferencePropertyValue(value, transform: transform)
-        } else {
-          result[key] = _remapObjectNumbers(
-            in: value,
-            referencePropertyIDs: referencePropertyIDs,
-            transform: transform
-          )
-        }
-      }
-      return result
-    } else if let array = jsonObject as? [Any] {
-      return array.map {
-        _remapObjectNumbers(
-          in: $0,
-          referencePropertyIDs: referencePropertyIDs,
-          transform: transform
-        )
-      }
-    }
-    return jsonObject
-  }
-
-  /// Remap OcaONo values within a reference property value.
-  private nonisolated static func _remapReferencePropertyValue(
-    _ value: Any,
-    transform: (OcaONo) -> OcaONo
-  ) -> Any {
-    if let onos = value as? [OcaONo] {
-      return onos.map(transform)
-    } else if let oNo = value as? OcaONo {
-      return transform(oNo)
-    }
-    return value
+    OcaProfileParameterDataset.remapObjectNumbers(
+      in: jsonObject,
+      referencePropertyIDs: referencePropertyIDs,
+      transform: transform
+    )
   }
 
   /// Compute the `_deviceModel` JSON value for an `OcaModelGUID`.

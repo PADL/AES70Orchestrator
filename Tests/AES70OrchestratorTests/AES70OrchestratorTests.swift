@@ -3706,3 +3706,265 @@ struct RemapObjectNumbersTests {
     #expect(result["4.1"] as? OcaONo == 999) // untouched
   }
 }
+
+// MARK: - Profile relation and filtered export tests
+
+@Suite
+struct ProfileRelationTests {
+  static func _device(_ serial: String) -> OcaConnectionBroker.DeviceIdentifier {
+    OcaConnectionBroker.DeviceIdentifier(
+      serviceType: .tcp,
+      modelGUID: OcaModelGUID(mfrCode: .init((0, 0, 0)), modelCode: (1, 2, 3, 4)),
+      serialNumber: serial,
+      name: serial
+    )
+  }
+
+  static let deviceA = _device("Device-A")
+  static let deviceB = _device("Device-B")
+  static let deviceC = _device("Device-C")
+
+  /// A seed profile ("ChannelStrip") bound to A and B, one "SimpleSwitch"
+  /// profile on each of A, B and C, and a second "SimpleSwitch" reachable only
+  /// via C — the shape of an input profile plus the user profiles sharing its
+  /// devices, with an unrelated profile elsewhere.
+  ///
+  /// The `OcaDevice` is returned so callers keep it alive: `deviceDelegate` is
+  /// a weak reference, and once it is gone `serializeParameterDataset` omits
+  /// `_deviceModel`, so profile state fails to deserialize on import.
+  @OcaDevice
+  static func _makeBoundCoordinator() async throws -> (
+    coordinator: OcaCoordinator,
+    device: OcaDevice,
+    seed: OcaProfile,
+    onA: OcaProfile,
+    onB: OcaProfile,
+    onC: OcaProfile
+  ) {
+    let (coordinator, device) = try await CoordinatorTests._makeCoordinator()
+
+    let seedONo = try await coordinator.addProfile(schema: "ChannelStrip", name: "Seed")
+    let seed = try coordinator._findProfile(oNo: seedONo)
+    try await coordinator.bindProfile(seed, to: deviceA)
+    try await coordinator.bindProfile(seed, to: deviceB)
+
+    let onAONo = try await coordinator.addProfile(schema: "SimpleSwitch", name: "OnA")
+    let onA = try coordinator._findProfile(oNo: onAONo)
+    try await coordinator.bindProfile(onA, to: deviceA)
+
+    // bound to B and C: the bridge that transitive traversal follows
+    let onBONo = try await coordinator.addProfile(schema: "SimpleSwitch", name: "OnB")
+    let onB = try coordinator._findProfile(oNo: onBONo)
+    try await coordinator.bindProfile(onB, to: deviceB)
+    try await coordinator.bindProfile(onB, to: deviceC)
+
+    let onCONo = try await coordinator.addProfile(schema: "SimpleSwitch", name: "OnC")
+    let onC = try coordinator._findProfile(oNo: onCONo)
+    try await coordinator.bindProfile(onC, to: deviceC)
+
+    return (coordinator, device, seed, onA, onB, onC)
+  }
+
+  @Test
+  func profilesBoundToDevice() async throws {
+    let f = try await Self._makeBoundCoordinator()
+    let onA = await f.coordinator.profiles(boundTo: Self.deviceA).map { $0.objectNumber }
+    #expect(onA == [await f.seed.objectNumber, await f.onA.objectNumber].sorted())
+
+    let onC = await f.coordinator.profiles(boundTo: Self.deviceC).map { $0.objectNumber }
+    #expect(onC == [await f.onB.objectNumber, await f.onC.objectNumber].sorted())
+  }
+
+  @Test
+  func profilesBoundToUnknownDeviceIsEmpty() async throws {
+    let f = try await Self._makeBoundCoordinator()
+    #expect(await f.coordinator.profiles(boundTo: Self._device("Nope")).isEmpty)
+  }
+
+  @Test
+  func relatedProfilesIncludesProfilesSharingADevice() async throws {
+    let f = try await Self._makeBoundCoordinator()
+    let related = await f.coordinator.profiles(relatedTo: f.seed).map { $0.objectNumber }
+
+    // seed + everything on A or B, but not the profile reachable only via C
+    #expect(related == [
+      await f.seed.objectNumber,
+      await f.onA.objectNumber,
+      await f.onB.objectNumber,
+    ].sorted())
+    #expect(!related.contains(await f.onC.objectNumber))
+  }
+
+  @Test
+  func relatedProfilesTransitiveFollowsSharedDevicesToClosure() async throws {
+    let f = try await Self._makeBoundCoordinator()
+    let related = await f.coordinator.profiles(relatedTo: f.seed, transitive: true)
+      .map { $0.objectNumber }
+
+    // onB bridges B → C, so onC is reachable transitively
+    #expect(related == [
+      await f.seed.objectNumber,
+      await f.onA.objectNumber,
+      await f.onB.objectNumber,
+      await f.onC.objectNumber,
+    ].sorted())
+  }
+
+  @Test
+  func relatedProfilesOfUnboundProfileIsJustItself() async throws {
+    let (coordinator, _device) = try await CoordinatorTests._makeCoordinator()
+    let oNo = try await coordinator.addProfile(schema: "ChannelStrip", name: "Lonely")
+    let profile = try await coordinator._findProfile(oNo: oNo)
+
+    let related = await coordinator.profiles(relatedTo: profile).map { $0.objectNumber }
+    #expect(related == [oNo])
+  }
+
+  @Test
+  func relatedProfilesTerminatesOnCycles() async throws {
+    // two profiles mutually reachable through two shared devices
+    let (coordinator, _device) = try await CoordinatorTests._makeCoordinator()
+    let oNo1 = try await coordinator.addProfile(schema: "ChannelStrip", name: "P1")
+    let oNo2 = try await coordinator.addProfile(schema: "SimpleSwitch", name: "P2")
+    let p1 = try await coordinator._findProfile(oNo: oNo1)
+    let p2 = try await coordinator._findProfile(oNo: oNo2)
+    for device in [Self.deviceA, Self.deviceB] {
+      try await coordinator.bindProfile(p1, to: device)
+      try await coordinator.bindProfile(p2, to: device)
+    }
+
+    let related = await coordinator.profiles(relatedTo: p1, transitive: true)
+      .map { $0.objectNumber }
+    #expect(related == [oNo1, oNo2].sorted())
+  }
+
+  @Test
+  func filteredExportContainsOnlySelectedProfiles() async throws {
+    let f = try await Self._makeBoundCoordinator()
+    let seedUUID = await f.seed.uuid
+    let onAUUID = await f.onA.uuid
+    let onBUUID = await f.onB.uuid
+    let onCUUID = await f.onC.uuid
+
+    let blob = try await f.coordinator.export(relatedTo: f.seed)
+
+    // merge into a coordinator that has no profiles at all
+    let (restored, _device) = try await CoordinatorTests._makeCoordinator()
+    try await restored.import(from: blob, clearExisting: false)
+
+    _ = try await restored.findProfile(uuid: seedUUID)
+    _ = try await restored.findProfile(uuid: onAUUID)
+    _ = try await restored.findProfile(uuid: onBUUID)
+    await #expect(throws: OcaCoordinatorError.self) {
+      try await restored.findProfile(uuid: onCUUID)
+    }
+  }
+
+  @Test
+  func filteredExportPreservesBindingsAndLabels() async throws {
+    let f = try await Self._makeBoundCoordinator()
+    let seedUUID = await f.seed.uuid
+
+    let blob = try await f.coordinator.export(relatedTo: f.seed)
+    let (restored, _device) = try await CoordinatorTests._makeCoordinator()
+    try await restored.import(from: blob, clearExisting: false)
+
+    let seed = try await restored.findProfile(uuid: seedUUID)
+    #expect(await seed.label == "Seed")
+    #expect(await seed.boundDevices.contains(Self.deviceA.id))
+    #expect(await seed.boundDevices.contains(Self.deviceB.id))
+  }
+
+  @Test
+  func filteredExportOmitsSchemasWithNoSelectedProfiles() async throws {
+    let f = try await Self._makeBoundCoordinator()
+    let onAUUID = await f.onA.uuid
+
+    // export the seed alone: the "SimpleSwitch" schema contributes nothing
+    let blob = try await f.coordinator.export(profiles: [f.seed])
+
+    let (restored, _device) = try await CoordinatorTests._makeCoordinator()
+    try await restored.import(from: blob, clearExisting: false)
+
+    _ = try await restored.findProfile(uuid: await f.seed.uuid)
+    await #expect(throws: OcaCoordinatorError.self) {
+      try await restored.findProfile(uuid: onAUUID)
+    }
+  }
+
+  @Test
+  func filteredExportMergesIntoCoordinatorWithExistingProfiles() async throws {
+    let f = try await Self._makeBoundCoordinator()
+    let blob = try await f.coordinator.export(relatedTo: f.seed)
+
+    let (restored, _device) = try await CoordinatorTests._makeCoordinator()
+    let keptUUID = UUID()
+    _ = try await restored.addProfile(schema: "ChannelStrip", name: "Kept", uuid: keptUUID)
+
+    try await restored.import(from: blob, clearExisting: false)
+
+    // the pre-existing profile survives alongside the imported ones
+    _ = try await restored.findProfile(uuid: keptUUID)
+    _ = try await restored.findProfile(uuid: await f.seed.uuid)
+  }
+
+  @Test
+  func filteredExportToFileRoundTrips() async throws {
+    let f = try await Self._makeBoundCoordinator()
+    let seedUUID = await f.seed.uuid
+
+    let tempURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent(UUID().uuidString + ".zip")
+    defer { try? FileManager.default.removeItem(at: tempURL) }
+    try await f.coordinator.export(relatedTo: f.seed, to: tempURL)
+    #expect(FileManager.default.fileExists(atPath: tempURL.path))
+
+    let (restored, _device) = try await CoordinatorTests._makeCoordinator()
+    try await restored.import(from: tempURL, clearExisting: false)
+    _ = try await restored.findProfile(uuid: seedUUID)
+    await #expect(throws: OcaCoordinatorError.self) {
+      try await restored.findProfile(uuid: await f.onC.uuid)
+    }
+  }
+
+  /// The point of exporting a related set is that the *settings* travel, not
+  /// just the profile identities — so assert on an actual parameter value.
+  @Test
+  func filteredExportPreservesProfileParameterState() async throws {
+    let f = try await Self._makeBoundCoordinator()
+    let seedUUID = await f.seed.uuid
+
+    // ChannelStrip profile index 1 → gain at 0x2000 | 1
+    let gainONo = try OcaONoMask(oNo: 0x2000, mask: 0x0F).objectNumber(for: 1)
+    let gain: SwiftOCADevice.OcaGain = try #require(
+      await f.device.resolve(objectNumber: gainONo)
+    )
+    await { @OcaDevice in
+      gain.gain = OcaBoundedPropertyValue<OcaDB>(value: -12.5, in: -144.0...20.0)
+    }()
+
+    let blob = try await f.coordinator.export(relatedTo: f.seed)
+
+    let (restored, restoredDevice) = try await CoordinatorTests._makeCoordinator()
+    try await restored.import(from: blob, clearExisting: false)
+    _ = try await restored.findProfile(uuid: seedUUID)
+
+    let restoredGain: SwiftOCADevice.OcaGain = try #require(
+      await restoredDevice.resolve(objectNumber: gainONo)
+    )
+    #expect(await restoredGain.gain.value == -12.5)
+  }
+
+  @Test
+  func unfilteredExportStillContainsEverything() async throws {
+    let f = try await Self._makeBoundCoordinator()
+    let blob = try await f.coordinator.export()
+
+    let (restored, _device) = try await CoordinatorTests._makeCoordinator()
+    try await restored.import(from: blob)
+
+    for uuid in await [f.seed.uuid, f.onA.uuid, f.onB.uuid, f.onC.uuid] {
+      _ = try await restored.findProfile(uuid: uuid)
+    }
+  }
+}

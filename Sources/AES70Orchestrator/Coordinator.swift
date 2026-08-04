@@ -451,6 +451,53 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
     throw OcaCoordinatorError.profileNotFound
   }
 
+  // MARK: - Profile relations
+
+  /// Every profile, across all schemas, currently bound to `deviceIdentifier`.
+  public func profiles(
+    boundTo deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
+  ) -> [OcaProfile] {
+    _schemaEntries.values
+      .flatMap { $0.profiles.actionObjects }
+      .filter { $0.deviceIndices[deviceIdentifier] != nil }
+      .sorted { $0.objectNumber < $1.objectNumber }
+  }
+
+  /// `profile` together with every profile that shares a bound device with it.
+  ///
+  /// Profiles are related through the devices they are bound to: given a profile
+  /// bound to devices *D*, the related set is every profile bound to any device
+  /// in *D*. This is schema-agnostic — it is the general form of "this profile
+  /// and everything else configured on the same hardware".
+  ///
+  /// When `transitive` is `false` (the default) the relation is followed one hop
+  /// from `profile` only. When `true` it is followed to closure, so profiles
+  /// reachable through a shared device of a *related* profile are also included.
+  ///
+  /// The result is ordered by object number and always contains `profile`.
+  public func profiles(
+    relatedTo profile: OcaProfile,
+    transitive: Bool = false
+  ) -> [OcaProfile] {
+    var selected = [OcaONo: OcaProfile]()
+    var visitedDevices = Set<SwiftOCA.OcaConnectionBroker.DeviceIdentifier>()
+    var pending = [profile]
+
+    while !pending.isEmpty {
+      let next = pending.removeFirst()
+      guard selected.updateValue(next, forKey: next.objectNumber) == nil else { continue }
+      // without `transitive`, only the seed profile's devices are expanded
+      guard transitive || next.objectNumber == profile.objectNumber else { continue }
+      for deviceIdentifier in next.deviceIndices.keys
+        where visitedDevices.insert(deviceIdentifier).inserted
+      {
+        pending.append(contentsOf: profiles(boundTo: deviceIdentifier))
+      }
+    }
+
+    return selected.values.sorted { $0.objectNumber < $1.objectNumber }
+  }
+
   private func _allocateDeviceIndex(
     entry: _SchemaEntry,
     for deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier,
@@ -657,6 +704,10 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
     AES70OrchestratorClient.OcaCoordinator.UnbindProfileParameters
   typealias FindOrDeleteProfileByNameParameters =
     AES70OrchestratorClient.OcaCoordinator.FindOrDeleteProfileByNameParameters
+  typealias ExportRelatedProfilesParameters =
+    AES70OrchestratorClient.OcaCoordinator.ExportRelatedProfilesParameters
+  typealias ImportProfilesParameters =
+    AES70OrchestratorClient.OcaCoordinator.ImportProfilesParameters
 
   private static func _mapError(_ error: OcaCoordinatorError) -> OcaStatus {
     switch error {
@@ -755,6 +806,21 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
       let blob: OcaLongBlob = try decodeCommand(command)
       try await ensureWritable(by: controller, command: command)
       try await `import`(from: blob)
+      return Ocp1Response()
+    case OcaMethodID("3.13"): // ExportRelatedProfiles(uuid, transitive) → OcaLongBlob
+      let params: ExportRelatedProfilesParameters = try decodeCommand(command)
+      try await ensureReadable(by: controller, command: command)
+      guard let uuid = UUID(uuidString: params.uuid) else {
+        throw Ocp1Error.status(.parameterError)
+      }
+      return try await encodeResponse(export(
+        relatedTo: findProfile(uuid: uuid),
+        transitive: params.transitive
+      ))
+    case OcaMethodID("3.14"): // ImportProfiles(blob, clearExisting)
+      let params: ImportProfilesParameters = try decodeCommand(command)
+      try await ensureWritable(by: controller, command: command)
+      try await `import`(from: params.blob, clearExisting: params.clearExisting)
       return Ocp1Response()
     default:
       return try await super.handleCommand(command, from: controller)

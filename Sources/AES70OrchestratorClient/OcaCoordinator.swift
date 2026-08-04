@@ -183,11 +183,59 @@ open class OcaCoordinator: SwiftOCA.OcaManager, @unchecked Sendable {
   }
 
   /// Imports profile state from a previously exported compressed archive blob,
-  /// recreating profiles and restoring their device bindings.
+  /// recreating profiles and restoring their device bindings. All existing
+  /// profiles are deleted first; use ``import(from:clearExisting:)`` to merge.
   public func `import`(from blob: OcaLongBlob) async throws {
     try await sendCommandRrq(
       methodID: OcaMethodID("3.10"),
       parameters: blob
+    )
+  }
+
+  public struct ExportRelatedProfilesParameters: Ocp1ParametersReflectable, Sendable {
+    public let uuid: OcaString
+    public let transitive: OcaBoolean
+
+    public init(uuid: OcaString, transitive: OcaBoolean) {
+      self.uuid = uuid
+      self.transitive = transitive
+    }
+  }
+
+  /// Exports the profile identified by `uuid` together with every profile that
+  /// shares a bound device with it, as a compressed archive blob. The result is
+  /// a partial archive and should be imported with `clearExisting: false`.
+  ///
+  /// When `transitive` is `false` the relation is followed one hop from the
+  /// named profile only; when `true` it is followed to closure.
+  public func export(
+    relatedTo uuid: String,
+    transitive: Bool = false
+  ) async throws -> OcaLongBlob {
+    try await sendCommandRrq(
+      methodID: OcaMethodID("3.13"),
+      parameters: ExportRelatedProfilesParameters(uuid: uuid, transitive: transitive)
+    )
+  }
+
+  public struct ImportProfilesParameters: Ocp1ParametersReflectable, Sendable {
+    public let blob: OcaLongBlob
+    public let clearExisting: OcaBoolean
+
+    public init(blob: OcaLongBlob, clearExisting: OcaBoolean) {
+      self.blob = blob
+      self.clearExisting = clearExisting
+    }
+  }
+
+  /// Imports profile state from a compressed archive blob. When `clearExisting`
+  /// is `true` all existing profiles are deleted first (replace-all, equivalent
+  /// to ``import(from:)``); when `false`, profiles whose UUID already exists are
+  /// left untouched and the rest are added (merge).
+  public func `import`(from blob: OcaLongBlob, clearExisting: Bool) async throws {
+    try await sendCommandRrq(
+      methodID: OcaMethodID("3.14"),
+      parameters: ImportProfilesParameters(blob: blob, clearExisting: clearExisting)
     )
   }
 }

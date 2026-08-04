@@ -72,14 +72,24 @@ extension OcaCoordinator {
     }
   }
 
-  private func _save(to archive: Archive) async throws {
+  /// Write profile state to `archive`. When `including` is non-`nil`, only
+  /// profiles whose object number it contains are written, and schemas left
+  /// with no profiles are omitted from the archive entirely — such a partial
+  /// archive is meant to be imported with `clearExisting: false`, since
+  /// replace-all would drop the profiles it does not mention.
+  private func _save(to archive: Archive, including: Set<OcaONo>? = nil) async throws {
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
 
     for (schemaName, entry) in _schemaEntries {
+      let profiles = entry.profiles.actionObjects.filter {
+        including?.contains($0.objectNumber) ?? true
+      }
+      guard !profiles.isEmpty else { continue }
+
       // build devices.json manifest
       var manifest = [String: _ProfileManifestEntry]()
-      for profile in entry.profiles.actionObjects {
+      for profile in profiles {
         let uuid = profile.role
         manifest[uuid] = _ProfileManifestEntry(
           name: profile.label,
@@ -95,7 +105,7 @@ extension OcaCoordinator {
       try _addEntry(to: archive, path: _manifestPath(for: schemaName), data: devicesData)
 
       // serialize each profile's state with ONo remapping
-      for profile in entry.profiles.actionObjects {
+      for profile in profiles {
         guard profile.proxyBlock != nil else { continue }
         let jsonObject = try await profile.serializeState()
         let stateData = try JSONSerialization.data(
@@ -194,11 +204,11 @@ extension OcaCoordinator {
     try await _ensureAutobindProfiles()
   }
 
-  public func export(to url: URL) async throws {
+  private func _export(to url: URL, including: Set<OcaONo>?) async throws {
     let tempURL = url.appendingPathExtension(UUID().uuidString)
     do {
       let archive = try Archive(url: tempURL, accessMode: .create)
-      try await _save(to: archive)
+      try await _save(to: archive, including: including)
       _ = try FileManager.default.replaceItemAt(url, withItemAt: tempURL)
     } catch {
       // don't leave a partial temp archive behind on failure
@@ -206,6 +216,26 @@ extension OcaCoordinator {
       throw error
     }
     logger.debug("Saved state to \(url.path)")
+  }
+
+  public func export(to url: URL) async throws {
+    try await _export(to: url, including: nil)
+  }
+
+  /// Export only `profiles` to a ZIP archive on disk. Import the result with
+  /// `clearExisting: false` to merge it into an existing coordinator.
+  public func export(profiles: some Sequence<OcaProfile>, to url: URL) async throws {
+    try await _export(to: url, including: Set(profiles.map(\.objectNumber)))
+  }
+
+  /// Export `profile` together with every profile sharing a bound device with
+  /// it — see ``OcaCoordinator/profiles(relatedTo:transitive:)``.
+  public func export(
+    relatedTo profile: OcaProfile,
+    transitive: Bool = false,
+    to url: URL
+  ) async throws {
+    try await export(profiles: profiles(relatedTo: profile, transitive: transitive), to: url)
   }
 
   /// Import state from a ZIP archive on disk. When `clearExisting` is `true`
@@ -217,9 +247,9 @@ extension OcaCoordinator {
     logger.debug("Loaded state from \(url.path)")
   }
 
-  public func export() async throws -> OcaLongBlob {
+  private func _export(including: Set<OcaONo>?) async throws -> OcaLongBlob {
     let archive = try Archive(data: Data(), accessMode: .create)
-    try await _save(to: archive)
+    try await _save(to: archive, including: including)
     guard let data = archive.data else {
       throw OcaCoordinatorError.persistenceError
     }
@@ -227,6 +257,29 @@ extension OcaCoordinator {
     blob.wrappedValue = data
     logger.debug("Saved state to blob (\(data.count) bytes)")
     return blob
+  }
+
+  public func export() async throws -> OcaLongBlob {
+    try await _export(including: nil)
+  }
+
+  /// Export only `profiles` as an in-memory ZIP archive blob. Import the result
+  /// with `clearExisting: false` to merge it into an existing coordinator.
+  public func export(profiles: some Sequence<OcaProfile>) async throws -> OcaLongBlob {
+    try await _export(including: Set(profiles.map(\.objectNumber)))
+  }
+
+  /// Export `profile` together with every profile sharing a bound device with
+  /// it — see ``OcaCoordinator/profiles(relatedTo:transitive:)``.
+  ///
+  /// This is the "take this profile and everything configured alongside it"
+  /// operation: for a mixer, seeding with an input profile yields that profile
+  /// plus the user profiles bound to the same devices.
+  public func export(
+    relatedTo profile: OcaProfile,
+    transitive: Bool = false
+  ) async throws -> OcaLongBlob {
+    try await export(profiles: profiles(relatedTo: profile, transitive: transitive))
   }
 
   /// Import state from an in-memory ZIP archive blob. When `clearExisting` is

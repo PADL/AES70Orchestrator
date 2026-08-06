@@ -457,7 +457,12 @@ public final class OcaObjectBinding<
     }
     remoteObjects.removeValue(forKey: remoteDevice)
     if let cancellable = remoteSubscriptions.removeValue(forKey: remoteDevice) {
-      try await remoteObject.connectionDelegate?.removeSubscription(cancellable)
+      do {
+        try await remoteObject.connectionDelegate?.removeSubscription(cancellable)
+      } catch Ocp1Error.notSubscribedToEvent {
+        // the connection clears its subscription table on disconnect, so this is
+        // the expected outcome when unbinding a device that has already gone away
+      }
     }
   }
 

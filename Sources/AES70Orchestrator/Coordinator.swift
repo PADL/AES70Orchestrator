@@ -542,7 +542,7 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
       .withDeviceConnection(deviceIdentifier) { @Sendable connection in connection }
   }
 
-  private func _bindProfile(
+  func _bindProfile(
     _ profile: OcaProfile,
     to deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier,
     deviceIndex: OcaONo? = nil
@@ -599,14 +599,16 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
     try await _unbindProfile(profile, from: deviceIdentifier)
   }
 
-  private func _activateProfile(
+  func _activateProfile(
     _ profile: OcaProfile,
     to deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
   ) async {
     guard let index = profile.deviceIndices[deviceIdentifier] else { return }
     logger.trace("Activating \(profile) for \(deviceIdentifier)")
+    let start = ContinuousClock.now
     do {
       try await connectionBroker.connect(device: deviceIdentifier)
+      let connected = ContinuousClock.now
       let connection = try await _connection(for: deviceIdentifier)
       let schema = try profile.profileSchema
       logger.debug(
@@ -634,7 +636,10 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
           }
         }
 
-        logger.trace("Activated \(profile) for \(deviceIdentifier)")
+        let now = ContinuousClock.now
+        logger.debug(
+          "activate: completed profileONo=\(profile.objectNumber.oNoString) device=\(deviceIdentifier.id) connect=\(start.duration(to: connected)) bind=\(connected.duration(to: now)) total=\(start.duration(to: now))"
+        )
       } catch {
         logger.warning("Failed to activate \(profile) for \(deviceIdentifier): \(error)")
         await profile.unbindAllRemoteObjects(from: deviceIdentifier)

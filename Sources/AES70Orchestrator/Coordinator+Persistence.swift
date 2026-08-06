@@ -188,13 +188,27 @@ extension OcaCoordinator {
           logger.warning("load: missing state entry for profile \(uuidString)")
         }
 
-        // restore bound devices after state so _copyProperties sends saved values
+        // restore bound devices after state so _copyProperties sends saved values.
+        // Index allocation stays ordered and synchronous; activation is all network
+        // I/O against independent connections, so it runs concurrently per device.
+        if profile.isAutomaticallyBound, !entry.restoredBindings.isEmpty {
+          throw OcaCoordinatorError.profileAutomaticallyBound
+        }
+        var boundDevices = [OcaConnectionBroker.DeviceIdentifier]()
         for binding in entry.restoredBindings {
           guard let deviceIdentifier = OcaConnectionBroker.DeviceIdentifier(binding.deviceID) else {
             logger.warning("load: invalid device identifier \(binding.deviceID)")
             continue
           }
-          try await bindProfile(profile, to: deviceIdentifier, deviceIndex: binding.deviceIndex)
+          try _bindProfile(profile, to: deviceIdentifier, deviceIndex: binding.deviceIndex)
+          boundDevices.append(deviceIdentifier)
+        }
+        await withDiscardingTaskGroup { group in
+          for deviceIdentifier in boundDevices
+            where profile.remoteObjectCount(for: deviceIdentifier) == 0
+          {
+            group.addTask { await self._activateProfile(profile, to: deviceIdentifier) }
+          }
         }
         logger.trace("Loaded profile \(uuidString) for schema \(schemaName)")
       }

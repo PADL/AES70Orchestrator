@@ -1094,30 +1094,39 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
 
     // serialize the entire proxy block and apply to the remote container
     do {
-      // resolve all top-level blocks and verify they share the same owner
-      var containerONo: OcaONo?
-      for block in schema.blocks {
-        let remoteONo = try block.remoteObjectNumber.objectNumber(for: deviceIndex)
-        guard let remoteBlock = try await connection.resolve(
-          objectOfUnknownClass: remoteONo
-        ) as? SwiftOCA.OcaBlock else {
-          return false
-        }
-        let ownerONo: OcaONo = try await remoteBlock.$owner._getValue(
-          remoteBlock,
-          flags: [.returnCachedValue, .cacheValue]
-        )
-        if let existing = containerONo {
-          guard existing == ownerONo else {
-            coordinator?.logger.debug(
-              "bindAllRemoteObjects: top-level blocks have different owners, falling back to per-block activation"
+      // resolve all top-level blocks and verify they share the same owner; each
+      // block costs two round trips, so query them concurrently
+      let owners = try await withThrowingTaskGroup(of: OcaONo?.self) { group in
+        for block in schema.blocks {
+          let remoteONo = try block.remoteObjectNumber.objectNumber(for: deviceIndex)
+          group.addTask {
+            guard let remoteBlock = try await connection.resolve(
+              objectOfUnknownClass: remoteONo
+            ) as? SwiftOCA.OcaBlock else {
+              return nil
+            }
+            return try await remoteBlock.$owner._getValue(
+              remoteBlock,
+              flags: [.returnCachedValue, .cacheValue]
             )
-            return false
           }
-        } else {
-          containerONo = ownerONo
         }
+        var results = [OcaONo?]()
+        for try await owner in group {
+          results.append(owner)
+        }
+        return results
       }
+
+      guard !owners.contains(where: { $0 == nil }) else { return false }
+      let containerONos = Set(owners.compactMap { $0 })
+      guard containerONos.count <= 1 else {
+        coordinator?.logger.debug(
+          "bindAllRemoteObjects: top-level blocks have different owners, falling back to per-block activation"
+        )
+        return false
+      }
+      let containerONo = containerONos.first
 
       guard let containerONo,
             let remoteContainer = try await connection.resolve(
@@ -1144,15 +1153,21 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
       return false
     }
 
-    // param-set succeeded — now bind and subscribe all blocks (skip per-block param-set)
-    for block in schema.blocks {
-      try await bindRemoteObjects(
-        to: deviceIdentifier,
-        deviceIndex: deviceIndex,
-        connection: connection,
-        schema: block,
-        skipParamSet: true
-      )
+    // param-set succeeded — now bind and subscribe all blocks (skip per-block
+    // param-set). No properties are written on this path, so the schema ordering
+    // that _reorderActionObjects preserves does not apply and blocks can overlap.
+    try await withThrowingDiscardingTaskGroup { group in
+      for block in schema.blocks {
+        group.addTask {
+          try await self.bindRemoteObjects(
+            to: deviceIdentifier,
+            deviceIndex: deviceIndex,
+            connection: connection,
+            schema: block,
+            skipParamSet: true
+          )
+        }
+      }
     }
     paramSetSyncCount += 1
     return true

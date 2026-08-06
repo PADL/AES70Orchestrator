@@ -1145,11 +1145,7 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
       coordinator?.logger.debug(
         "bindAllRemoteObjects: applying whole-profile param-set blob (\(blob.count) bytes) to remote container \(containerONo.oNoString) on \(deviceIdentifier)"
       )
-      let applyStart = ContinuousClock.now
       try await remoteContainer.apply(parameterData: blob)
-      coordinator?.logger.debug(
-        "bindAllRemoteObjects: apply took \(applyStart.duration(to: .now)) on \(deviceIdentifier)"
-      )
     } catch {
       coordinator?.logger.warning(
         "bindAllRemoteObjects: whole-profile param-set failed on \(deviceIdentifier): \(error), falling back to per-block activation"
@@ -1160,7 +1156,6 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     // param-set succeeded — now bind and subscribe all blocks (skip per-block
     // param-set). No properties are written on this path, so the schema ordering
     // that _reorderActionObjects preserves does not apply and blocks can overlap.
-    let subscribeStart = ContinuousClock.now
     try await withThrowingDiscardingTaskGroup { group in
       for block in schema.blocks {
         group.addTask {
@@ -1174,9 +1169,6 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
         }
       }
     }
-    coordinator?.logger.debug(
-      "bindAllRemoteObjects: bind/subscribe took \(subscribeStart.duration(to: .now)) on \(deviceIdentifier)"
-    )
     paramSetSyncCount += 1
     return true
   }

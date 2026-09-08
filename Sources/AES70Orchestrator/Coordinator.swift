@@ -346,9 +346,11 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
     }
   }
 
-  public func onEvent(_ event: SwiftOCA.OcaEvent, parameters: Data) async {
+  public func onEvent(_ event: SwiftOCA.OcaEvent, parameters: OcaEventParameters) async {
+    // SwiftOCA now delivers event parameters lazily encoded; decode once.
+    guard let encoded = try? parameters.encoded else { return }
     if event.emitterONo == objectNumber,
-       let eventData = try? OcaPropertyChangedEventData<Data>(data: parameters),
+       let eventData = try? OcaPropertyChangedEventData<Data>(data: encoded),
        eventData.propertyID == OcaPropertyID("3.2")
     {
       return
@@ -356,7 +358,7 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
     logger.trace("onEvent: emitterONo=\(event.emitterONo.oNoString), eventID=\(event.eventID)")
     for entry in _schemaEntries.values {
       for profile in entry.profiles.actionObjects {
-        await profile.handleLocalEvent(event, parameters: parameters)
+        await profile.handleLocalEvent(event, parameters: encoded)
       }
     }
     _eventsContinuation.yield(event)

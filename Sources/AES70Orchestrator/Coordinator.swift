@@ -746,7 +746,7 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
       let params: AddProfileParameters = try decodeCommand(command)
       try await ensureWritable(by: controller, command: command)
       let oNo = try await addProfile(schema: params.schema, name: params.name)
-      return try encodeResponse(oNo)
+      return try controller.encodeResponse(oNo)
     case OcaMethodID("3.3"): // BindProfile(oNo, deviceId, index)
       let params: BindProfileParameters = try decodeCommand(command)
       try await ensureWritable(by: controller, command: command)
@@ -787,14 +787,14 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
     case OcaMethodID("3.7"): // FindProfileByName(name, schema) → ONo
       let params: FindOrDeleteProfileByNameParameters = try decodeCommand(command)
       try await ensureReadable(by: controller, command: command)
-      return try encodeResponse(findProfile(named: params.name, schema: params.schema).objectNumber)
+      return try controller.encodeResponse(findProfile(named: params.name, schema: params.schema).objectNumber)
     case OcaMethodID("3.8"): // FindProfileByUUID(uuid) → ONo
       let uuid: OcaString = try decodeCommand(command)
       try await ensureReadable(by: controller, command: command)
       guard let uuid = UUID(uuidString: uuid) else {
         throw Ocp1Error.status(.parameterError)
       }
-      return try encodeResponse(findProfile(uuid: uuid).objectNumber)
+      return try controller.encodeResponse(findProfile(uuid: uuid).objectNumber)
     case OcaMethodID("3.11"): // DeleteProfileByONo(oNo)
       let oNo: OcaONo = try decodeCommand(command)
       try await ensureWritable(by: controller, command: command)
@@ -803,7 +803,7 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
     case OcaMethodID("3.9"): // Export() → OcaLongBlob
       try decodeNullCommand(command)
       try await ensureReadable(by: controller, command: command)
-      return try await encodeResponse(export())
+      return try await controller.encodeResponse(export())
     case OcaMethodID("3.10"): // Import(OcaLongBlob)
       let blob: OcaLongBlob = try decodeCommand(command)
       try await ensureWritable(by: controller, command: command)
@@ -815,7 +815,7 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
       guard let uuid = UUID(uuidString: params.uuid) else {
         throw Ocp1Error.status(.parameterError)
       }
-      return try await encodeResponse(export(
+      return try await controller.encodeResponse(export(
         relatedTo: findProfile(uuid: uuid),
         transitive: params.transitive
       ))

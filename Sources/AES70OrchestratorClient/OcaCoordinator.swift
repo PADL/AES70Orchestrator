@@ -44,7 +44,7 @@ open class OcaCoordinator: SwiftOCA.OcaManager, @unchecked Sendable {
 
   // MARK: - Profile management
 
-  public struct AddProfileParameters: Ocp1ParametersReflectable, Sendable {
+  public struct AddProfileParameters: OcaParametersReflectable, Sendable {
     public let schema: OcaString
     public let name: OcaString?
 
@@ -66,7 +66,7 @@ open class OcaCoordinator: SwiftOCA.OcaManager, @unchecked Sendable {
   /// Sentinel value indicating the coordinator should automatically allocate a device index.
   public static let AutoDeviceIndex: OcaUint16 = 0xFFFF
 
-  public struct BindProfileParameters: Ocp1ParametersReflectable, Sendable {
+  public struct BindProfileParameters: OcaParametersReflectable, Sendable {
     public let profileONo: OcaONo
     public let deviceIdentifier: OcaString
     public let deviceIndex: OcaUint16
@@ -96,7 +96,7 @@ open class OcaCoordinator: SwiftOCA.OcaManager, @unchecked Sendable {
     )
   }
 
-  public struct UnbindProfileParameters: Ocp1ParametersReflectable, Sendable {
+  public struct UnbindProfileParameters: OcaParametersReflectable, Sendable {
     public let profileONo: OcaONo
     public let deviceIdentifier: OcaString
 
@@ -123,7 +123,7 @@ open class OcaCoordinator: SwiftOCA.OcaManager, @unchecked Sendable {
 
   // MARK: - Profile deletion
 
-  public struct FindOrDeleteProfileByNameParameters: Ocp1ParametersReflectable, Sendable {
+  public struct FindOrDeleteProfileByNameParameters: OcaParametersReflectable, Sendable {
     public let name: OcaString
     public let schema: OcaString
 
@@ -192,7 +192,7 @@ open class OcaCoordinator: SwiftOCA.OcaManager, @unchecked Sendable {
     )
   }
 
-  public struct ExportRelatedProfilesParameters: Ocp1ParametersReflectable, Sendable {
+  public struct ExportRelatedProfilesParameters: OcaParametersReflectable, Sendable {
     public let uuid: OcaString
     public let transitive: OcaBoolean
 
@@ -218,7 +218,7 @@ open class OcaCoordinator: SwiftOCA.OcaManager, @unchecked Sendable {
     )
   }
 
-  public struct ImportProfilesParameters: Ocp1ParametersReflectable, Sendable {
+  public struct ImportProfilesParameters: OcaParametersReflectable, Sendable {
     public let blob: OcaLongBlob
     public let clearExisting: OcaBoolean
 

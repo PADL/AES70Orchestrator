@@ -64,7 +64,7 @@ public final class OcaObjectBinding<
   let referenceProperties: [OcaPropertyID: OcaProfileReferencePropertySchema]
   var remoteObjects = [SwiftOCA.OcaConnectionBroker.DeviceIdentifier: Remote]()
   var remoteSubscriptions =
-    [SwiftOCA.OcaConnectionBroker.DeviceIdentifier: Ocp1Connection.SubscriptionCancellable]()
+    [SwiftOCA.OcaConnectionBroker.DeviceIdentifier: OcaConnection.SubscriptionCancellable]()
   weak var profile: OcaProfile?
   private var _forwardingFromRemote = false
 

@@ -70,11 +70,11 @@ enum ExampleOrchestrator {
     }
 
     #if os(Linux)
-    let endpoint = try await Ocp1IORingStreamDeviceEndpoint(
+    let endpoint = try await OcaIORingStreamDeviceEndpoint(
       address: listenAddress.socketAddressData
     )
     #elseif canImport(FlyingSocks)
-    let endpoint = try await Ocp1FlyingSocksStreamDeviceEndpoint(
+    let endpoint = try await OcaFlyingSocksStreamDeviceEndpoint(
       address: listenAddress.socketAddressData
     )
     #else
@@ -92,7 +92,7 @@ enum ExampleOrchestrator {
     let yamlString = try String(contentsOf: yamlURL, encoding: .utf8)
     let ocaDeviceSchema = try await OcaDeviceSchema(yaml: yamlString)
 
-    let connectionOptions = Ocp1ConnectionOptions(
+    let connectionOptions = OcaConnectionOptions(
       flags: [.automaticReconnect, .refreshDeviceTreeOnConnection]
     )
     let coordinator = try await OcaCoordinator(

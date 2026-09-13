@@ -950,7 +950,7 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
   func bindRemoteObjects(
     to deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier,
     deviceIndex: OcaONo,
-    connection: Ocp1Connection,
+    connection: OcaConnection,
     schema: OcaProfileObjectSchema,
     skipParamSet: Bool = false
   ) async throws {
@@ -1083,7 +1083,7 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
   func bindAllRemoteObjects(
     to deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier,
     deviceIndex: OcaONo,
-    connection: Ocp1Connection
+    connection: OcaConnection
   ) async throws -> Bool {
     guard proxyBlock != nil else { return false }
     let schema = try profileSchema

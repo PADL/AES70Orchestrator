@@ -229,7 +229,7 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
 
   @OcaDevice
   public convenience init(
-    connectionOptions: Ocp1ConnectionOptions = .init(),
+    connectionOptions: OcaConnectionOptions = .init(),
     serviceTypes: Set<OcaNetworkAdvertisingServiceType>? = nil,
     deviceSchema: OcaDeviceSchema,
     deviceDelegate: OcaDevice? = nil,
@@ -539,7 +539,7 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
 
   private func _connection(
     for deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
-  ) async throws -> Ocp1Connection {
+  ) async throws -> OcaConnection {
     try await connectionBroker
       .withDeviceConnection(deviceIdentifier) { @Sendable connection in connection }
   }

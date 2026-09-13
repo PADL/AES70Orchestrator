@@ -1156,7 +1156,7 @@ struct PersistenceTests {
     let localDevice = OcaDevice()
     try await localDevice.initializeDefaultObjects()
     let broker = await OcaConnectionBroker(
-      connectionOptions: Ocp1ConnectionOptions(flags: [
+      connectionOptions: OcaConnectionOptions(flags: [
         .automaticReconnect,
         .refreshDeviceTreeOnConnection,
       ]),
@@ -1193,7 +1193,7 @@ struct PersistenceTests {
     let restoredDevice = OcaDevice()
     try await restoredDevice.initializeDefaultObjects()
     let restoredBroker = await OcaConnectionBroker(
-      connectionOptions: Ocp1ConnectionOptions(flags: [
+      connectionOptions: OcaConnectionOptions(flags: [
         .automaticReconnect,
         .refreshDeviceTreeOnConnection,
       ]),
@@ -1244,7 +1244,7 @@ struct PersistenceTests {
     let localDevice = OcaDevice()
     try await localDevice.initializeDefaultObjects()
     let broker = await OcaConnectionBroker(
-      connectionOptions: Ocp1ConnectionOptions(flags: [
+      connectionOptions: OcaConnectionOptions(flags: [
         .automaticReconnect,
         .refreshDeviceTreeOnConnection,
       ]),
@@ -1272,7 +1272,7 @@ struct PersistenceTests {
     let restoredDevice = OcaDevice()
     try await restoredDevice.initializeDefaultObjects()
     let restoredBroker = await OcaConnectionBroker(
-      connectionOptions: Ocp1ConnectionOptions(flags: [
+      connectionOptions: OcaConnectionOptions(flags: [
         .automaticReconnect,
         .refreshDeviceTreeOnConnection,
       ]),
@@ -1314,7 +1314,7 @@ struct PersistenceTests {
     let localDevice = OcaDevice()
     try await localDevice.initializeDefaultObjects()
     let broker = await OcaConnectionBroker(
-      connectionOptions: Ocp1ConnectionOptions(flags: [
+      connectionOptions: OcaConnectionOptions(flags: [
         .automaticReconnect,
         .refreshDeviceTreeOnConnection,
       ]),
@@ -1387,7 +1387,7 @@ struct PersistenceTests {
     let localDevice = OcaDevice()
     try await localDevice.initializeDefaultObjects()
     let broker = await OcaConnectionBroker(
-      connectionOptions: Ocp1ConnectionOptions(flags: [
+      connectionOptions: OcaConnectionOptions(flags: [
         .automaticReconnect,
         .refreshDeviceTreeOnConnection,
       ]),
@@ -1452,7 +1452,7 @@ final class _LateRegisteredLevelSensor: SwiftOCADevice.OcaLevelSensor {
   }
 }
 
-@OcaConnection
+@OcaConnectionActor
 final class _ReferenceScalarProxyObject: SwiftOCA.OcaWorker {
   override class var classID: OcaClassID { OcaClassID(
     parent: SwiftOCA.OcaWorker.classID,
@@ -1901,7 +1901,7 @@ struct EndToEndTests {
     listenAddress.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
     #endif
 
-    let endpoint = try await Ocp1DeviceEndpoint(
+    let endpoint = try await OcaTCPDeviceEndpoint(
       address: listenAddress.socketAddressData,
       device: device
     )
@@ -2127,7 +2127,7 @@ struct EndToEndTests {
     listenAddress.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
     #endif
 
-    let endpoint = try await Ocp1DeviceEndpoint(
+    let endpoint = try await OcaTCPDeviceEndpoint(
       address: listenAddress.socketAddressData,
       device: device
     )
@@ -2188,7 +2188,7 @@ struct EndToEndTests {
     listenAddress.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
     #endif
 
-    let endpoint = try await Ocp1DeviceEndpoint(
+    let endpoint = try await OcaTCPDeviceEndpoint(
       address: listenAddress.socketAddressData,
       device: device
     )
@@ -2214,7 +2214,7 @@ struct EndToEndTests {
     let localDevice = OcaDevice()
     try await localDevice.initializeDefaultObjects()
 
-    let connectionOptions = Ocp1ConnectionOptions(
+    let connectionOptions = OcaConnectionOptions(
       flags: [.automaticReconnect, .refreshDeviceTreeOnConnection]
     )
     let broker = await OcaConnectionBroker(
@@ -2248,7 +2248,7 @@ struct EndToEndTests {
     #if canImport(Darwin) || os(FreeBSD) || os(OpenBSD)
     remoteAddress.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
     #endif
-    let connection = try await Ocp1TCPConnection(
+    let connection = try await OcaTCPConnection(
       deviceAddress: remoteAddress.socketAddressData,
       options: connectionOptions
     )
@@ -2293,7 +2293,7 @@ struct EndToEndTests {
     // build coordinator and profile WITHOUT connecting yet
     let localDevice = OcaDevice()
     try await localDevice.initializeDefaultObjects()
-    let connectionOptions = Ocp1ConnectionOptions(
+    let connectionOptions = OcaConnectionOptions(
       flags: [.automaticReconnect, .refreshDeviceTreeOnConnection]
     )
     let broker = await OcaConnectionBroker(
@@ -2333,7 +2333,7 @@ struct EndToEndTests {
     #if canImport(Darwin) || os(FreeBSD) || os(OpenBSD)
     remoteAddress.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
     #endif
-    let connection = try await Ocp1TCPConnection(
+    let connection = try await OcaTCPConnection(
       deviceAddress: remoteAddress.socketAddressData,
       options: connectionOptions
     )
@@ -2437,7 +2437,7 @@ struct EndToEndTests {
     #if canImport(Darwin) || os(FreeBSD) || os(OpenBSD)
     remoteAddress.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
     #endif
-    let clientConnection = try await Ocp1TCPConnection(
+    let clientConnection = try await OcaTCPConnection(
       deviceAddress: remoteAddress.socketAddressData
     )
     try await clientConnection.connect()
@@ -2491,7 +2491,7 @@ struct EndToEndTests {
     #if canImport(Darwin) || os(FreeBSD) || os(OpenBSD)
     remoteAddress.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
     #endif
-    let clientConnection = try await Ocp1TCPConnection(
+    let clientConnection = try await OcaTCPConnection(
       deviceAddress: remoteAddress.socketAddressData
     )
     try await clientConnection.connect()
@@ -2571,7 +2571,7 @@ struct EndToEndTests {
 
     let localDevice = OcaDevice()
     try await localDevice.initializeDefaultObjects()
-    let connectionOptions = Ocp1ConnectionOptions(
+    let connectionOptions = OcaConnectionOptions(
       flags: [.automaticReconnect, .refreshDeviceTreeOnConnection]
     )
     let broker = await OcaConnectionBroker(
@@ -2624,7 +2624,7 @@ struct EndToEndTests {
     #if canImport(Darwin) || os(FreeBSD) || os(OpenBSD)
     remoteAddress.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
     #endif
-    let connection = try await Ocp1TCPConnection(
+    let connection = try await OcaTCPConnection(
       deviceAddress: remoteAddress.socketAddressData,
       options: connectionOptions
     )
@@ -2686,7 +2686,7 @@ struct EndToEndTests {
 
     let localDevice = OcaDevice()
     try await localDevice.initializeDefaultObjects()
-    let connectionOptions = Ocp1ConnectionOptions(
+    let connectionOptions = OcaConnectionOptions(
       flags: [.automaticReconnect, .refreshDeviceTreeOnConnection]
     )
     let broker = await OcaConnectionBroker(
@@ -2739,7 +2739,7 @@ struct EndToEndTests {
     #if canImport(Darwin) || os(FreeBSD) || os(OpenBSD)
     remoteAddress.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
     #endif
-    let connection = try await Ocp1TCPConnection(
+    let connection = try await OcaTCPConnection(
       deviceAddress: remoteAddress.socketAddressData,
       options: connectionOptions
     )
@@ -2843,7 +2843,7 @@ struct EndToEndTests {
     listenAddress.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
     #endif
 
-    let endpoint = try await Ocp1DeviceEndpoint(
+    let endpoint = try await OcaTCPDeviceEndpoint(
       address: listenAddress.socketAddressData,
       device: device
     )
@@ -2871,7 +2871,7 @@ struct EndToEndTests {
 
     let localDevice = OcaDevice()
     try await localDevice.initializeDefaultObjects()
-    let connectionOptions = Ocp1ConnectionOptions(
+    let connectionOptions = OcaConnectionOptions(
       flags: [.automaticReconnect, .refreshDeviceTreeOnConnection]
     )
     let broker = await OcaConnectionBroker(
@@ -2912,7 +2912,7 @@ struct EndToEndTests {
     #if canImport(Darwin) || os(FreeBSD) || os(OpenBSD)
     remoteAddress.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
     #endif
-    let connection = try await Ocp1TCPConnection(
+    let connection = try await OcaTCPConnection(
       deviceAddress: remoteAddress.socketAddressData,
       options: connectionOptions
     )
@@ -3082,7 +3082,7 @@ struct EndToEndTests {
     listenAddress.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
     #endif
 
-    let endpoint = try await Ocp1DeviceEndpoint(
+    let endpoint = try await OcaTCPDeviceEndpoint(
       address: listenAddress.socketAddressData,
       device: device
     )
@@ -3110,7 +3110,7 @@ struct EndToEndTests {
 
     let localDevice = OcaDevice()
     try await localDevice.initializeDefaultObjects()
-    let connectionOptions = Ocp1ConnectionOptions(
+    let connectionOptions = OcaConnectionOptions(
       flags: [.automaticReconnect, .refreshDeviceTreeOnConnection]
     )
     let broker = await OcaConnectionBroker(
@@ -3163,7 +3163,7 @@ struct EndToEndTests {
     #if canImport(Darwin) || os(FreeBSD) || os(OpenBSD)
     remoteAddress.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
     #endif
-    let connection = try await Ocp1TCPConnection(
+    let connection = try await OcaTCPConnection(
       deviceAddress: remoteAddress.socketAddressData,
       options: connectionOptions
     )
@@ -3334,7 +3334,7 @@ struct EndToEndTests {
     listenAddress.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
     #endif
 
-    let endpoint = try await Ocp1DeviceEndpoint(
+    let endpoint = try await OcaTCPDeviceEndpoint(
       address: listenAddress.socketAddressData,
       device: device
     )
@@ -3362,7 +3362,7 @@ struct EndToEndTests {
 
     let localDevice = OcaDevice()
     try await localDevice.initializeDefaultObjects()
-    let connectionOptions = Ocp1ConnectionOptions(
+    let connectionOptions = OcaConnectionOptions(
       flags: [.automaticReconnect, .refreshDeviceTreeOnConnection]
     )
     let broker = await OcaConnectionBroker(
@@ -3409,7 +3409,7 @@ struct EndToEndTests {
     #if canImport(Darwin) || os(FreeBSD) || os(OpenBSD)
     remoteAddress.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
     #endif
-    let connection = try await Ocp1TCPConnection(
+    let connection = try await OcaTCPConnection(
       deviceAddress: remoteAddress.socketAddressData,
       options: connectionOptions
     )

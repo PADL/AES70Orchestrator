@@ -323,6 +323,31 @@ struct YAMLPropertyFilterTests {
   }
 
   @Test
+  func deviceManagerPropertiesParsedFromYAML() async throws {
+    let yaml = """
+    device:
+      name: Test
+      profiles:
+        - TestProfile:
+            device-manager-props: ["4.16"]
+            blocks:
+              - Gain:
+                  class-id: \(SwiftOCADevice.OcaGain.classID)
+                  class-version: \(SwiftOCADevice.OcaGain.classVersion)
+                  match: 0x00000200/0x00000000
+        - Plain:
+          - Gain:
+              class-id: \(SwiftOCADevice.OcaGain.classID)
+              class-version: \(SwiftOCADevice.OcaGain.classVersion)
+              match: 0x00000200/0x00000000
+    """
+    let schema = try await _parseYAML(yaml)
+    #expect(schema.profileSchemas[0].deviceManagerProperties == [OcaPropertyID("4.16")])
+    #expect(schema.profileSchemas[0].blocks.count == 1)
+    #expect(schema.profileSchemas[1].deviceManagerProperties.isEmpty)
+  }
+
+  @Test
   func excludePropertiesParsedFromYAML() async throws {
     let yaml = """
     device:

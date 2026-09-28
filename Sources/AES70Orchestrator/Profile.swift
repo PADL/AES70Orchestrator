@@ -270,6 +270,7 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     )
     if let name { proxyBlock.label = name }
     try await _createLocalObjects(proxyBlock: proxyBlock)
+    try await _createDeviceManagerBinding()
     self.proxyBlock = proxyBlock
     try await entry.proxies.add(actionObject: proxyBlock)
     try await entry.profiles.add(actionObject: self)
@@ -1195,10 +1196,42 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
   @OcaDevice
   func deleteLocalObjects() async throws {
     let device = try coordinator?.device
-    for oNo in objectBindings.keys {
+    // the device manager is the coordinator's, not this profile's
+    for oNo in objectBindings.keys where oNo != OcaDeviceManagerONo {
       try await device?.deregister(objectNumber: oNo)
     }
     objectBindings.removeAll()
+  }
+
+  /// Binds the coordinator's device manager to each bound device's, for the properties
+  /// the schema names; the local values are copied out on activation and the device's
+  /// own put back on unbind.
+  private func _createDeviceManagerBinding() async throws {
+    guard let coordinator else { throw Ocp1Error.status(.deviceError) }
+    let properties = try profileSchema.deviceManagerProperties
+    guard !properties.isEmpty else { return }
+    let deviceManager: SwiftOCADevice.OcaRoot = try await coordinator.device.deviceManager
+    addObjectBinding(OcaObjectBinding<SwiftOCADevice.OcaRoot, SwiftOCA.OcaRoot>(
+      localObject: deviceManager,
+      profile: self,
+      flags: [.remoteFollowerOnly],
+      includeProperties: properties,
+      restoreOnUnbind: true
+    ), for: OcaDeviceManagerONo)
+  }
+
+  func bindDeviceManager(
+    to deviceIdentifier: SwiftOCA.OcaConnectionBroker.DeviceIdentifier,
+    connection: OcaConnection
+  ) async throws {
+    guard let binding = objectBinding(for: OcaDeviceManagerONo) else { return }
+    let remoteDeviceManager: SwiftOCA.OcaRoot = try await connection
+      .resolve(objectOfUnknownClass: OcaDeviceManagerONo)
+    try await binding.bind(
+      remoteObject: remoteDeviceManager,
+      from: deviceIdentifier,
+      skipInitialPropertyCopy: false
+    )
   }
 
   deinit {

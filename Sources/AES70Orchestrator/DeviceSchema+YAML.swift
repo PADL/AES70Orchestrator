@@ -184,6 +184,7 @@ extension OcaDeviceSchema {
 
     let blockSequence: Node.Sequence
     var autobind = false
+    var deviceManagerProperties = Set<OcaPropertyID>()
 
     if let sequence = valueNode.sequence {
       blockSequence = sequence
@@ -194,6 +195,12 @@ extension OcaDeviceSchema {
       }
       blockSequence = seq
       autobind = valueMapping["autobind"]?.bool ?? false
+      if let seq = Self._node(
+        in: valueMapping,
+        keys: ["device-manager-props", "deviceManagerProperties"]
+      )?.sequence {
+        deviceManagerProperties = Set(seq.compactMap { $0.string.map { OcaPropertyID($0) } })
+      }
     } else {
       throw OcaCoordinatorError
         .schemaParseError("profile '\(name)' value must be a sequence of blocks or a mapping")
@@ -203,7 +210,12 @@ extension OcaDeviceSchema {
     for node in blockSequence {
       try blocks.append(_parseObjectSchema(node))
     }
-    return OcaProfileSchema(name: name, blocks: blocks, autobind: autobind)
+    return OcaProfileSchema(
+      name: name,
+      blocks: blocks,
+      autobind: autobind,
+      deviceManagerProperties: deviceManagerProperties
+    )
   }
 
   @OcaDevice

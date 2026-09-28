@@ -635,6 +635,7 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
             )
           }
         }
+        try await profile.bindDeviceManager(to: deviceIdentifier, connection: connection)
 
         logger.trace("Activated \(profile) for \(deviceIdentifier)")
       } catch {

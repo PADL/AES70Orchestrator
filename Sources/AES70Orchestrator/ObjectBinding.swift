@@ -62,7 +62,11 @@ public final class OcaObjectBinding<
   let includeProperties: Set<OcaPropertyID>?
   let excludeProperties: Set<OcaPropertyID>
   let referenceProperties: [OcaPropertyID: OcaProfileReferencePropertySchema]
+  /// Put the forwarded properties back to what the remote had when it is unbound.
+  let restoreOnUnbind: Bool
   var remoteObjects = [SwiftOCA.OcaConnectionBroker.DeviceIdentifier: Remote]()
+  private var restoreValues =
+    [SwiftOCA.OcaConnectionBroker.DeviceIdentifier: [(OcaPropertyID, Data)]]()
   var remoteSubscriptions =
     [SwiftOCA.OcaConnectionBroker.DeviceIdentifier: OcaConnection.SubscriptionCancellable]()
   weak var profile: OcaProfile?
@@ -91,13 +95,15 @@ public final class OcaObjectBinding<
     flags: OcaProfileObjectFlags = [],
     includeProperties: Set<OcaPropertyID>? = nil,
     excludeProperties: Set<OcaPropertyID> = [],
-    referenceProperties: [OcaPropertyID: OcaProfileReferencePropertySchema] = [:]
+    referenceProperties: [OcaPropertyID: OcaProfileReferencePropertySchema] = [:],
+    restoreOnUnbind: Bool = false
   ) {
     self.localObject = localObject
     self.flags = flags
     self.includeProperties = includeProperties
     self.excludeProperties = excludeProperties
     self.referenceProperties = referenceProperties
+    self.restoreOnUnbind = restoreOnUnbind
     self.profile = profile
     profile.addObjectBinding(self, for: localObject.objectNumber)
   }
@@ -128,6 +134,25 @@ public final class OcaObjectBinding<
   ) {
     remoteObjects.removeValue(forKey: deviceIdentifier)
     remoteSubscriptions.removeValue(forKey: deviceIdentifier)
+    restoreValues.removeValue(forKey: deviceIdentifier)
+  }
+
+  /// The remote's current values of the properties this binding forwards, as OCP.1 bytes
+  /// ready to be forwarded back.
+  private func _captureRestoreValues(of remoteObject: Remote) async -> [(OcaPropertyID, Data)] {
+    var captured = [(OcaPropertyID, Data)]()
+    for (_, keyPath) in await remoteObject.allPropertyKeyPaths {
+      guard let property = remoteObject[keyPath: keyPath]
+        as? (any OcaPropertySubjectRepresentable)
+      else { continue }
+      for propertyID in property.propertyIDs where _shouldForwardProperty(propertyID) {
+        guard let value = try? await property._getValue(remoteObject, flags: []),
+              let data: Data = try? Ocp1Encoder().encode(value)
+        else { continue }
+        captured.append((propertyID, data))
+      }
+    }
+    return captured
   }
 
   private func _remapEventDataForRemote(
@@ -419,6 +444,9 @@ public final class OcaObjectBinding<
     profile?.coordinator?.logger.trace(
       "bind: local object \(localObject.objectNumber.oNoString) bound to remote object \(remoteObject.objectNumber.oNoString) on \(remoteDevice)\(skipInitialPropertyCopy ? " (param-set sync)" : "")"
     )
+    if restoreOnUnbind, restoreValues[remoteDevice] == nil {
+      restoreValues[remoteDevice] = await _captureRestoreValues(of: remoteObject)
+    }
     if !skipInitialPropertyCopy {
       try await _copyProperties(to: remoteObject, remoteDevice: remoteDevice)
     }
@@ -452,6 +480,17 @@ public final class OcaObjectBinding<
     remoteObject: SwiftOCA.OcaRoot,
     from remoteDevice: SwiftOCA.OcaConnectionBroker.DeviceIdentifier
   ) async throws {
+    for (propertyID, value) in restoreValues.removeValue(forKey: remoteDevice) ?? [] {
+      let eventData = OcaAnyPropertyChangedEventData(
+        propertyID: propertyID,
+        propertyValue: value,
+        changeType: .currentChanged
+      )
+      try? await remoteObject.forward(
+        event: OcaEvent(emitterONo: remoteObject.objectNumber, eventID: OcaPropertyChangedEventID),
+        eventData: eventData
+      )
+    }
     if lockRemote {
       try? await remoteObject.unlock()
     }

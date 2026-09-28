@@ -369,10 +369,21 @@ public final class OcaProfileSchema: Sendable, CustomStringConvertible {
     "OcaProfileSchema(name: \(name), blocks: \(blocks.count), autobind: \(autobind))"
   }
 
-  public init(name: String, blocks: [OcaProfileObjectSchema], autobind: Bool = false) {
+  /// Properties of the coordinator's own device manager copied to each bound device's
+  /// device manager while the profile is bound: written on every activation and put back
+  /// to the values the device had when the device is unbound.
+  public let deviceManagerProperties: Set<OcaPropertyID>
+
+  public init(
+    name: String,
+    blocks: [OcaProfileObjectSchema],
+    autobind: Bool = false,
+    deviceManagerProperties: Set<OcaPropertyID> = []
+  ) {
     self.name = name
     self.blocks = blocks
     self.autobind = autobind
+    self.deviceManagerProperties = deviceManagerProperties
   }
 
   /// Maps each class ID in the schema to the property IDs that are reference

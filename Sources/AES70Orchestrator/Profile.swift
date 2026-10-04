@@ -790,7 +790,7 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
   }
 
   /// Serialize local block state as a parameter-dataset blob suitable for
-  /// ``SwiftOCA.OcaBlock/apply(parameterData:)``, with `_oNo` values remapped
+  /// ``SwiftOCA.OcaBlock/applyParameterData(data:)``, with `_oNo` values remapped
   /// from local profile-space to remote device-space and properties filtered
   /// according to the schema's include/exclude rules.
   ///
@@ -1016,7 +1016,7 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
         coordinator?.logger.debug(
           "bindRemoteObjects: applying param-set blob (\(blob.count) bytes) to remote block \(remoteONo.oNoString) on \(deviceIdentifier)"
         )
-        try await remoteBlock.apply(parameterData: blob)
+        try await remoteBlock.applyParameterData(data: blob)
       } catch {
         coordinator?.logger.warning(
           "bindRemoteObjects: param-set sync failed for \(schema.role) on \(deviceIdentifier): \(error), falling back to per-property copy"
@@ -1142,7 +1142,7 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
       coordinator?.logger.debug(
         "bindAllRemoteObjects: applying whole-profile param-set blob (\(blob.count) bytes) to remote container \(containerONo.oNoString) on \(deviceIdentifier)"
       )
-      try await remoteContainer.apply(parameterData: blob)
+      try await remoteContainer.applyParameterData(data: blob)
     } catch {
       coordinator?.logger.warning(
         "bindAllRemoteObjects: whole-profile param-set failed on \(deviceIdentifier): \(error), falling back to per-block activation"

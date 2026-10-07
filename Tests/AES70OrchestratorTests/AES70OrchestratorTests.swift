@@ -1473,6 +1473,7 @@ final class _LateRegisteredLevelSensor: SwiftOCADevice.OcaLevelSensor {
   }
 }
 
+@OcaConnectionActor
 @OcaClass
 final class _ReferenceScalarProxyObject: SwiftOCA.OcaWorker {
   override class var classID: OcaClassID { OcaClassID(

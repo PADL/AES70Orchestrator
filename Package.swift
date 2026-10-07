@@ -21,7 +21,7 @@ let package = Package(
         ),
     ],
     dependencies: [
-      .package(url: "https://github.com/PADL/SwiftOCA", branch: "main"),
+      .package(url: "https://github.com/PADL/SwiftOCA", branch: "property-key-path-tables"),
       .package(url: "https://github.com/PADL/SocketAddress", from: "0.4.5"),
       .package(url: "https://github.com/apple/swift-log", from: "1.6.2"),
       .package(url: "https://github.com/jpsim/Yams", from: "6.2.1"),

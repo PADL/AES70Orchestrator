@@ -20,6 +20,7 @@ let PADLCompanyID = OcaOrganizationID((0x0A, 0xE9, 0x1B))
 
 /// Client-side proxy for the coordinator manager that manages profile lifecycle,
 /// device discovery, and binding on the orchestrator device.
+@OcaClass
 open class OcaCoordinator: SwiftOCA.OcaManager, @unchecked Sendable {
   override open class var classID: OcaClassID { OcaClassID(
     parent: super.classID,

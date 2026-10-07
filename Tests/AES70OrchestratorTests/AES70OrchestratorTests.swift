@@ -14,11 +14,7 @@
 // limitations under the License.
 //
 
-#if canImport(FoundationEssentials)
-import FoundationEssentials
-#else
 import Foundation
-#endif
 @testable import AES70Orchestrator
 import Testing
 @testable @_spi(SwiftOCAPrivate) import SwiftOCA
@@ -3489,16 +3485,23 @@ struct EndToEndTests {
 struct RemapObjectNumbersTests {
   private static let groupClassID = SwiftOCADevice.OcaGroup<SwiftOCADevice.OcaGain>.classID
 
+  /// Round-trips through JSONSerialization so object numbers are plain numbers,
+  /// as they are in a parsed parameter dataset.
+  private static func _parsed(_ jsonObject: [String: Any]) throws -> [String: Any] {
+    let data = try JSONSerialization.data(withJSONObject: jsonObject)
+    return try JSONSerialization.jsonObject(with: data) as! [String: Any]
+  }
+
   @Test
-  func remapsONoKeysWithoutReferenceProperties() {
-    let jsonObject: [String: Any] = [
-      "_oNo": OcaONo(0x1000),
+  func remapsONoKeysWithoutReferenceProperties() throws {
+    let jsonObject = try Self._parsed([
+      "_oNo": 0x1000,
       "_classID": "1.1.3",
-      "4.1": OcaONo(42),
+      "4.1": 42,
       "3.2": [
-        ["_oNo": OcaONo(0x2000), "_classID": "1.1.1.5", "4.1": OcaFloat32(-12.5)],
+        ["_oNo": 0x2000, "_classID": "1.1.1.5", "4.1": OcaFloat32(-12.5)],
       ] as [[String: Any]],
-    ]
+    ])
 
     let result = OcaProfile._remapObjectNumbers(
       in: jsonObject,
@@ -3506,26 +3509,26 @@ struct RemapObjectNumbersTests {
     ) as! [String: Any]
 
     // _oNo keys are remapped
-    #expect(result["_oNo"] as? OcaONo == 0x1100)
+    #expect(result["_oNo"] as? OcaUint32 == 0x1100)
     let actionObjects = result["3.2"] as! [[String: Any]]
-    #expect(actionObjects[0]["_oNo"] as? OcaONo == 0x2100)
+    #expect(actionObjects[0]["_oNo"] as? OcaUint32 == 0x2100)
 
     // non-_oNo integer values are NOT remapped
-    #expect(result["4.1"] as? OcaONo == 42)
+    #expect(result["4.1"] as? OcaUint32 == 42)
     #expect(actionObjects[0]["4.1"] as? OcaFloat32 == -12.5)
   }
 
   @Test
-  func remapsArrayReferenceProperty() {
+  func remapsArrayReferenceProperty() throws {
     let refProps: [String: Set<String>] = [
       Self.groupClassID.description: ["3.1"],
     ]
 
-    let jsonObject: [String: Any] = [
-      "_oNo": OcaONo(0x5000),
+    let jsonObject = try Self._parsed([
+      "_oNo": 0x5000,
       "_classID": Self.groupClassID.description,
-      "3.1": [OcaONo(0x6000), OcaONo(0x7000)],
-    ]
+      "3.1": [0x6000, 0x7000],
+    ])
 
     let result = OcaProfile._remapObjectNumbers(
       in: jsonObject,
@@ -3533,24 +3536,24 @@ struct RemapObjectNumbersTests {
       transform: { $0 + 0x100 }
     ) as! [String: Any]
 
-    #expect(result["_oNo"] as? OcaONo == 0x5100)
-    let members = result["3.1"] as! [OcaONo]
+    #expect(result["_oNo"] as? OcaUint32 == 0x5100)
+    let members = result["3.1"] as! [OcaUint32]
     #expect(members == [0x6100, 0x7100])
   }
 
   @Test
-  func remapsScalarReferenceProperty() {
+  func remapsScalarReferenceProperty() throws {
     let scalarClassID = _ReferenceScalarDeviceObject.classID
 
     let refProps: [String: Set<String>] = [
       scalarClassID.description: ["4.1"],
     ]
 
-    let jsonObject: [String: Any] = [
-      "_oNo": OcaONo(0x4000),
+    let jsonObject = try Self._parsed([
+      "_oNo": 0x4000,
       "_classID": scalarClassID.description,
-      "4.1": OcaONo(0x6000),
-    ]
+      "4.1": 0x6000,
+    ])
 
     let result = OcaProfile._remapObjectNumbers(
       in: jsonObject,
@@ -3558,22 +3561,22 @@ struct RemapObjectNumbersTests {
       transform: { $0 + 0x100 }
     ) as! [String: Any]
 
-    #expect(result["_oNo"] as? OcaONo == 0x4100)
-    #expect(result["4.1"] as? OcaONo == 0x6100)
+    #expect(result["_oNo"] as? OcaUint32 == 0x4100)
+    #expect(result["4.1"] as? OcaUint32 == 0x6100)
   }
 
   @Test
-  func doesNotRemapNonReferenceIntegerProperties() {
+  func doesNotRemapNonReferenceIntegerProperties() throws {
     let refProps: [String: Set<String>] = [
       Self.groupClassID.description: ["3.1"],
     ]
 
-    let jsonObject: [String: Any] = [
-      "_oNo": OcaONo(0x5000),
+    let jsonObject = try Self._parsed([
+      "_oNo": 0x5000,
       "_classID": Self.groupClassID.description,
-      "3.1": [OcaONo(0x6000)],
-      "2.1": OcaONo(0x9999),
-    ]
+      "3.1": [0x6000],
+      "2.1": 0x9999,
+    ])
 
     let result = OcaProfile._remapObjectNumbers(
       in: jsonObject,
@@ -3582,24 +3585,24 @@ struct RemapObjectNumbersTests {
     ) as! [String: Any]
 
     // reference property remapped
-    let members = result["3.1"] as! [OcaONo]
+    let members = result["3.1"] as! [OcaUint32]
     #expect(members == [0x6100])
 
     // non-reference integer property left untouched
-    #expect(result["2.1"] as? OcaONo == 0x9999)
+    #expect(result["2.1"] as? OcaUint32 == 0x9999)
   }
 
   @Test
-  func doesNotRemapWhenClassIDMissing() {
+  func doesNotRemapWhenClassIDMissing() throws {
     let refProps: [String: Set<String>] = [
       Self.groupClassID.description: ["3.1"],
     ]
 
-    let jsonObject: [String: Any] = [
-      "_oNo": OcaONo(0x5000),
+    let jsonObject = try Self._parsed([
+      "_oNo": 0x5000,
       // no _classID — should not remap reference properties
-      "3.1": [OcaONo(0x6000)],
-    ]
+      "3.1": [0x6000],
+    ])
 
     let result = OcaProfile._remapObjectNumbers(
       in: jsonObject,
@@ -3607,23 +3610,23 @@ struct RemapObjectNumbersTests {
       transform: { $0 + 0x100 }
     ) as! [String: Any]
 
-    #expect(result["_oNo"] as? OcaONo == 0x5100)
+    #expect(result["_oNo"] as? OcaUint32 == 0x5100)
     // without _classID, 3.1 is not recognized as a reference property
-    let members = result["3.1"] as! [OcaONo]
+    let members = result["3.1"] as! [OcaUint32]
     #expect(members == [0x6000])
   }
 
   @Test
-  func doesNotRemapWhenClassIDDoesNotMatchSchema() {
+  func doesNotRemapWhenClassIDDoesNotMatchSchema() throws {
     let refProps: [String: Set<String>] = [
       Self.groupClassID.description: ["3.1"],
     ]
 
-    let jsonObject: [String: Any] = [
-      "_oNo": OcaONo(0x5000),
+    let jsonObject = try Self._parsed([
+      "_oNo": 0x5000,
       "_classID": "1.1.1.5", // OcaGain, not a group
-      "3.1": [OcaONo(0x6000)],
-    ]
+      "3.1": [0x6000],
+    ])
 
     let result = OcaProfile._remapObjectNumbers(
       in: jsonObject,
@@ -3631,33 +3634,33 @@ struct RemapObjectNumbersTests {
       transform: { $0 + 0x100 }
     ) as! [String: Any]
 
-    #expect(result["_oNo"] as? OcaONo == 0x5100)
-    let members = result["3.1"] as! [OcaONo]
+    #expect(result["_oNo"] as? OcaUint32 == 0x5100)
+    let members = result["3.1"] as! [OcaUint32]
     #expect(members == [0x6000])
   }
 
   @Test
-  func remapsNestedReferenceProperties() {
+  func remapsNestedReferenceProperties() throws {
     let refProps: [String: Set<String>] = [
       Self.groupClassID.description: ["3.1"],
     ]
 
-    let jsonObject: [String: Any] = [
-      "_oNo": OcaONo(0x1000),
+    let jsonObject = try Self._parsed([
+      "_oNo": 0x1000,
       "_classID": "1.1.3",
       "3.2": [
         [
-          "_oNo": OcaONo(0x5000),
+          "_oNo": 0x5000,
           "_classID": Self.groupClassID.description,
-          "3.1": [OcaONo(0x6000), OcaONo(0x7000)],
+          "3.1": [0x6000, 0x7000],
         ] as [String: Any],
         [
-          "_oNo": OcaONo(0x6000),
+          "_oNo": 0x6000,
           "_classID": "1.1.1.5",
           "4.1": OcaFloat32(-6.0),
         ] as [String: Any],
       ] as [[String: Any]],
-    ]
+    ])
 
     let result = OcaProfile._remapObjectNumbers(
       in: jsonObject,
@@ -3667,12 +3670,12 @@ struct RemapObjectNumbersTests {
 
     let actionObjects = result["3.2"] as! [[String: Any]]
     let groupObj = actionObjects[0]
-    #expect(groupObj["_oNo"] as? OcaONo == 0x5100)
-    let members = groupObj["3.1"] as! [OcaONo]
+    #expect(groupObj["_oNo"] as? OcaUint32 == 0x5100)
+    let members = groupObj["3.1"] as! [OcaUint32]
     #expect(members == [0x6100, 0x7100])
 
     let gainObj = actionObjects[1]
-    #expect(gainObj["_oNo"] as? OcaONo == 0x6100)
+    #expect(gainObj["_oNo"] as? OcaUint32 == 0x6100)
     // gain's float property untouched
     #expect(gainObj["4.1"] as? OcaFloat32 == -6.0)
   }
@@ -3714,12 +3717,12 @@ struct RemapObjectNumbersTests {
   }
 
   @Test
-  func emptyReferencePropertyIDsPreservesLegacyBehavior() {
-    let jsonObject: [String: Any] = [
-      "_oNo": OcaONo(0x1000),
+  func emptyReferencePropertyIDsPreservesLegacyBehavior() throws {
+    let jsonObject = try Self._parsed([
+      "_oNo": 0x1000,
       "_classID": "1.1.3",
-      "4.1": OcaONo(999),
-    ]
+      "4.1": 999,
+    ])
 
     // default (no referencePropertyIDs) should behave like the original function
     let result = OcaProfile._remapObjectNumbers(
@@ -3727,8 +3730,8 @@ struct RemapObjectNumbersTests {
       transform: { $0 + 1 }
     ) as! [String: Any]
 
-    #expect(result["_oNo"] as? OcaONo == 0x1001)
-    #expect(result["4.1"] as? OcaONo == 999) // untouched
+    #expect(result["_oNo"] as? OcaUint32 == 0x1001)
+    #expect(result["4.1"] as? OcaUint32 == 999) // untouched
   }
 }
 

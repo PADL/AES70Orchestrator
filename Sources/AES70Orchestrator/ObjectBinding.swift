@@ -206,16 +206,16 @@ public final class OcaObjectBinding<
     let propertyValue: any Sendable
 
     if let onos = try? Ocp1Decoder().decode([OcaONo].self, from: eventData.propertyValue) {
-      propertyValue = onos
+      propertyValue = onos.map(\.rawValue)
     } else if let oNo = try? Ocp1Decoder().decode(OcaONo.self, from: eventData.propertyValue) {
-      propertyValue = oNo
+      propertyValue = oNo.rawValue
     } else {
       throw Ocp1Error.status(.badFormat)
     }
 
     try await localObject.deserialize(
       jsonObject: [
-        "_oNo": localObject.objectNumber,
+        "_oNo": localObject.objectNumber.rawValue,
         "_classID": type(of: localObject).classID.description,
         eventData.propertyID.description: propertyValue,
       ],

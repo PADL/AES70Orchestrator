@@ -99,6 +99,7 @@ final class _SchemaEntry {
 /// It exposes an OCA manager interface and orchestrates connections between local proxy
 /// objects and remote device objects according to the configured device schema.
 @OcaDevice
+@OcaDeviceClass
 public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDeviceEventDelegate {
   override public class var classID: OcaClassID { OcaClassID(
     parent: super.classID,

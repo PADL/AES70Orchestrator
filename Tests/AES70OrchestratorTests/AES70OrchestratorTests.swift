@@ -1474,6 +1474,7 @@ final class _LateRegisteredLevelSensor: SwiftOCADevice.OcaLevelSensor {
 }
 
 @OcaConnectionActor
+@OcaClass
 final class _ReferenceScalarProxyObject: SwiftOCA.OcaWorker {
   override class var classID: OcaClassID { OcaClassID(
     parent: SwiftOCA.OcaWorker.classID,
@@ -1490,6 +1491,7 @@ final class _ReferenceScalarProxyObject: SwiftOCA.OcaWorker {
 }
 
 @OcaDevice
+@OcaDeviceClass
 final class _ReferenceScalarDeviceObject: SwiftOCADevice.OcaWorker {
   override class var classID: OcaClassID { _ReferenceScalarProxyObject.classID }
 
@@ -1502,6 +1504,7 @@ final class _ReferenceScalarDeviceObject: SwiftOCADevice.OcaWorker {
 }
 
 @OcaDevice
+@OcaDeviceClass
 final class _PlainScalarDeviceObject: SwiftOCADevice.OcaWorker {
   override class var classID: OcaClassID { OcaClassID(
     parent: SwiftOCADevice.OcaWorker.classID,

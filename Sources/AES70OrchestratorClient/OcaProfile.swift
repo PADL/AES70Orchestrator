@@ -18,6 +18,7 @@ import SwiftOCA
 
 /// Client-side proxy for a profile instance. Each profile is bound to one or more
 /// remote devices and manages a set of local proxy objects that mirror remote device objects.
+@OcaClass
 open class OcaProfile: SwiftOCA.OcaAgent, @unchecked Sendable {
   override open class var classID: OcaClassID { OcaClassID(
     parent: super.classID,

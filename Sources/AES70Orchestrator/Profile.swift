@@ -504,7 +504,7 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     from defaults: [OcaPropertyID: [String: any Sendable]]
   ) -> [String: any Sendable] {
     var json: [String: any Sendable] = [
-      "_oNo": object.objectNumber,
+      "_oNo": object.objectNumber.rawValue,
       "_classID": type(of: object).classID.description,
     ]
     for (propertyID, dict) in defaults {
@@ -595,28 +595,14 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
               schema?.referenceProperty(for: propertyID) == nil
     {
       return value
-    } else if let onos = value as? [OcaONo] {
-      return onos.map {
+    } else if let oNos = OcaONo.array(jsonValue: value) {
+      return oNos.map {
         _remapStoredONo($0, oNoMap: oNoMap, proxyBlockONo: proxyBlockONo, toMasked: toMasked)
+          .rawValue
       }
-    } else if let numbers = value as? [NSNumber] {
-      return numbers.map {
-        _remapStoredONo(
-          OcaONo(truncating: $0),
-          oNoMap: oNoMap,
-          proxyBlockONo: proxyBlockONo,
-          toMasked: toMasked
-        )
-      }
-    } else if let oNo = value as? OcaONo {
+    } else if let oNo = OcaONo(jsonValue: value) {
       return _remapStoredONo(oNo, oNoMap: oNoMap, proxyBlockONo: proxyBlockONo, toMasked: toMasked)
-    } else if let number = value as? NSNumber {
-      return _remapStoredONo(
-        OcaONo(truncating: number),
-        oNoMap: oNoMap,
-        proxyBlockONo: proxyBlockONo,
-        toMasked: toMasked
-      )
+        .rawValue
     } else {
       return value
     }
@@ -632,20 +618,13 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
   ) -> [String: any Sendable] {
     var result = jsonObject
 
-    if let oNo = result["_oNo"] as? OcaONo {
+    if let oNo = result["_oNo"].flatMap({ OcaONo(jsonValue: $0) }) {
       result["_oNo"] = _remapStoredONo(
         oNo,
         oNoMap: oNoMap,
         proxyBlockONo: proxyBlockONo,
         toMasked: toMasked
-      )
-    } else if let number = result["_oNo"] as? NSNumber {
-      result["_oNo"] = _remapStoredONo(
-        OcaONo(truncating: number),
-        oNoMap: oNoMap,
-        proxyBlockONo: proxyBlockONo,
-        toMasked: toMasked
-      )
+      ).rawValue
     }
 
     for (key, value) in result {
@@ -730,14 +709,14 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     // sort the action array by schema position (unknown objects go to the end)
     let sentinel = schema.actionObjectSchema.count
     actionArray.sort { a, b in
-      let oNoA = a["_oNo"] as? OcaONo ?? 0
-      let oNoB = b["_oNo"] as? OcaONo ?? 0
+      let oNoA = a["_oNo"].flatMap { OcaONo(jsonValue: $0) } ?? 0
+      let oNoB = b["_oNo"].flatMap { OcaONo(jsonValue: $0) } ?? 0
       return (orderByRemoteONo[oNoA] ?? sentinel) < (orderByRemoteONo[oNoB] ?? sentinel)
     }
 
     // recurse into child blocks
     for i in actionArray.indices {
-      let childONo = actionArray[i]["_oNo"] as? OcaONo ?? 0
+      let childONo = actionArray[i]["_oNo"].flatMap { OcaONo(jsonValue: $0) } ?? 0
       if let childSchema = schema.actionObjectSchema.first(where: { childSchema in
         guard let mask = childSchema.localObjectNumber else { return false }
         return (try? objectNumberForLocal(mask))
@@ -902,7 +881,7 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
       // whole-profile: reorder within each top-level block
       if var actionArray = jsonObject["3.2"] as? [[String: any Sendable]] {
         for i in actionArray.indices {
-          let childONo = actionArray[i]["_oNo"] as? OcaONo ?? 0
+          let childONo = actionArray[i]["_oNo"].flatMap { OcaONo(jsonValue: $0) } ?? 0
           if let blockSchema = profileSchema.blocks.first(where: { blockSchema in
             guard let mask = blockSchema.localObjectNumber else { return false }
             return (try? objectNumber(for: mask))
@@ -936,7 +915,7 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
 
     // when applying to a specific remote container, rewrite the top-level ONo
     if let targetRemoteONo {
-      jsonObject["_oNo"] = targetRemoteONo
+      jsonObject["_oNo"] = targetRemoteONo.rawValue
     }
 
     // add parameter-dataset metadata expected by the remote device

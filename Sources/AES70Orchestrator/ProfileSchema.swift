@@ -14,6 +14,7 @@
 // limitations under the License.
 //
 
+import Foundation
 import SwiftOCA
 import SwiftOCADevice
 
@@ -315,8 +316,8 @@ public enum OcaProfileParameterDataset {
       let classID = dict["_classID"] as? String
       let referenceProperties = classID.flatMap { referencePropertyIDs[$0] } ?? []
       for (key, value) in dict {
-        if key == "_oNo", let oNo = value as? OcaONo {
-          result[key] = transform(oNo)
+        if key == "_oNo", let oNo = OcaONo(jsonValue: value) {
+          result[key] = transform(oNo).rawValue
         } else if referenceProperties.contains(key) {
           result[key] = _remapReferenceValue(value, transform: transform)
         } else {
@@ -346,12 +347,32 @@ public enum OcaProfileParameterDataset {
     _ value: Any,
     transform: (OcaONo) -> OcaONo
   ) -> Any {
-    if let oNos = value as? [OcaONo] {
-      return oNos.map(transform)
-    } else if let oNo = value as? OcaONo {
-      return transform(oNo)
+    if let oNos = OcaONo.array(jsonValue: value) {
+      return oNos.map { transform($0).rawValue }
+    } else if let oNo = OcaONo(jsonValue: value) {
+      return transform(oNo).rawValue
     }
     return value
+  }
+}
+
+extension OcaONo {
+  /// An object number held in a JSON container as a plain number; a struct
+  /// does not bridge to NSNumber, so write `rawValue` back.
+  init?(jsonValue: Any) {
+    if let rawValue = jsonValue as? OcaUint32 {
+      self.init(rawValue: rawValue)
+    } else if let number = jsonValue as? NSNumber {
+      self.init(truncating: number)
+    } else {
+      return nil
+    }
+  }
+
+  static func array(jsonValue: Any) -> [OcaONo]? {
+    guard let values = jsonValue as? [Any] else { return nil }
+    let oNos = values.compactMap { OcaONo(jsonValue: $0) }
+    return oNos.count == values.count ? oNos : nil
   }
 }
 

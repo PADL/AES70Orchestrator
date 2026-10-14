@@ -1035,6 +1035,17 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
         throw error
       }
       paramSetSyncCount += 1
+    } else if skipParamSet {
+      // The caller's whole-profile param-set already wrote every property: only
+      // register the remote objects. Copying again would race the blocks' bindings,
+      // remapping a reference property (VCA members) before its targets are bound.
+      for (binding, remoteObject) in resolvedBindings {
+        try await binding.bind(
+          remoteObject: remoteObject,
+          from: deviceIdentifier,
+          skipInitialPropertyCopy: true
+        )
+      }
     } else {
       // Phase 1 (per-property): copy properties to all remote objects before
       // subscribing, so that no subscription events can overwrite local proxy state.

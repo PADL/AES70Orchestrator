@@ -651,11 +651,18 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     return result
   }
 
+  /// The proxy block's owner is the coordinator's proxies container, outside the
+  /// profile: it is set when the block is added and isn't part of its state. Left
+  /// in, it would be remapped on restore whenever it equals a local mask's base.
+  private static func _removingOwner(_ jsonObject: [String: any Sendable]) -> [String: any Sendable] {
+    jsonObject.filter { key, _ in (try? OcaPropertyID(unsafeString: key)) != _ownerPropertyID }
+  }
+
   func serializeState() async throws -> [String: any Sendable] {
     guard let proxyBlock else { throw Ocp1Error.status(.deviceError) }
     let schema = try profileSchema
     let oNoMap = try _buildONoMap()
-    let jsonObject = try await proxyBlock.serializeParameterDataset()
+    let jsonObject = try await Self._removingOwner(proxyBlock.serializeParameterDataset())
     return _remapONos(
       in: jsonObject,
       schema: nil,
@@ -671,7 +678,7 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     let schema = try profileSchema
     let oNoMap = try _buildONoMap()
     let remapped = _remapONos(
-      in: jsonObject,
+      in: Self._removingOwner(jsonObject),
       schema: nil,
       childSchemas: schema.blocks,
       oNoMap: oNoMap,

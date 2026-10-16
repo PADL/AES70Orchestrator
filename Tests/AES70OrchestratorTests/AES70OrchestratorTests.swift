@@ -3999,3 +3999,47 @@ struct ProfileRelationTests {
     }
   }
 }
+
+@Suite
+struct ProxyBlockOwnerTests {
+  /// A schema whose local object number base equals its proxies container's
+  /// object number, as with MonitorTwo's input profile (0x405).
+  static func _makeCollidingSchema() -> OcaDeviceSchema {
+    // one schema: the proxies container is ProfileProxiesContainerONo + 1 + 1 + 0
+    let proxiesONo = ProfileProxiesContainerONo + 2
+    let gainSchema = OcaProfileObjectSchema(
+      role: "Gain",
+      type: SwiftOCADevice.OcaGain.self,
+      localObjectNumber: OcaONoMask(oNo: proxiesONo, mask: 0x0F00_0000),
+      remoteObjectNumber: OcaONoMask(oNo: 0x200, mask: 0)
+    )
+    return OcaDeviceSchema(
+      name: "Colliding",
+      models: [],
+      profileSchemas: [OcaProfileSchema(name: "Colliding", blocks: [gainSchema])]
+    )
+  }
+
+  @Test
+  func restoredProxyBlockKeepsItsOwnerAndCanBeDeleted() async throws {
+    let device = OcaDevice()
+    try await device.initializeDefaultObjects()
+    let broker = await OcaConnectionBroker(connectionOptions: .init(), serviceTypes: nil, deviceModels: nil)
+    let coordinator = try await OcaCoordinator(
+      connectionBroker: broker,
+      deviceSchema: Self._makeCollidingSchema(),
+      deviceDelegate: device
+    )
+
+    let uuid = UUID()
+    _ = try await coordinator.addProfile(schema: "Colliding", name: "Colliding", uuid: uuid)
+    let blob = try await coordinator.export(profiles: [coordinator.findProfile(uuid: uuid)])
+    try await coordinator.deleteProfile(uuid: uuid)
+    try await coordinator.import(from: blob, clearExisting: false)
+
+    let restored = try await coordinator.findProfile(uuid: uuid)
+    let proxyBlock = try #require(await restored.proxyBlock)
+    #expect(await proxyBlock.owner == ProfileProxiesContainerONo + 2)
+    try await coordinator.deleteProfile(uuid: uuid)
+  }
+}

@@ -223,7 +223,12 @@ extension OcaCoordinator {
     do {
       let archive = try Archive(url: tempURL, accessMode: .create)
       try await _save(to: archive, including: including)
-      _ = try FileManager.default.replaceItemAt(url, withItemAt: tempURL)
+      // corelibs Foundation's replaceItemAt fails when there is nothing at url to replace
+      if FileManager.default.fileExists(atPath: url.path) {
+        _ = try FileManager.default.replaceItemAt(url, withItemAt: tempURL)
+      } else {
+        try FileManager.default.moveItem(at: tempURL, to: url)
+      }
     } catch {
       // don't leave a partial temp archive behind on failure
       try? FileManager.default.removeItem(at: tempURL)

@@ -57,6 +57,8 @@ Each object in the schema specifies:
 - **`include-props`** — optional list of property IDs to forward between local and remote objects. When set, only listed properties are forwarded.
 - **`exclude-props`** — list of property IDs to never forward between local and remote objects.
 
+Property IDs are dotted numbers (e.g. `"4.1"`). The coordinator rejects a schema that names a property the object's class does not have, in `include-props`, `exclude-props`, `reference-props`, `property-defaults` or `device-manager-props`.
+
 ### Profile-level options
 
 When using the mapping form for a profile, the following options are available:

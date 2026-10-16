@@ -209,7 +209,9 @@ public final class OcaCoordinator: SwiftOCADevice.OcaManager, Sendable, OcaDevic
     )
     let device = try device
     let schemaCount = OcaONo(deviceSchema.profileSchemas.count)
+    let deviceManager: SwiftOCADevice.OcaRoot = await device.deviceManager
     for (index, schema) in deviceSchema.profileSchemas.enumerated() {
+      try await schema.validatePropertyIDs(deviceManager: deviceManager)
       _schemaEntries[schema.name] = try await _SchemaEntry(
         schema: schema,
         index: index,

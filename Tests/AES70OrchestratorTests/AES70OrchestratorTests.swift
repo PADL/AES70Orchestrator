@@ -310,11 +310,11 @@ struct YAMLPropertyFilterTests {
               match: 0x00000200/0x00000000
               include-props:
                 - "4.1"
-                - "3.1"
+                - "2.1"
     """
     let schema = try await _parseYAML(yaml)
     let gain = schema.profileSchemas[0].blocks[0]
-    #expect(gain.includeProperties == Set([OcaPropertyID("4.1"), OcaPropertyID("3.1")]))
+    #expect(gain.includeProperties == Set([OcaPropertyID("4.1"), OcaPropertyID("2.1")]))
     #expect(gain.excludeProperties.isEmpty)
   }
 
@@ -4041,5 +4041,108 @@ struct ProxyBlockOwnerTests {
     let proxyBlock = try #require(await restored.proxyBlock)
     #expect(await proxyBlock.owner == ProfileProxiesContainerONo + 2)
     try await coordinator.deleteProfile(uuid: uuid)
+  }
+}
+
+@Suite
+struct SchemaPropertyValidationTests {
+  @OcaDevice
+  static func _makeCoordinator(_ deviceSchema: OcaDeviceSchema) async throws -> OcaCoordinator {
+    let device = OcaDevice()
+    try await device.initializeDefaultObjects()
+
+    let broker = await OcaConnectionBroker(
+      connectionOptions: .init(),
+      serviceTypes: nil,
+      deviceModels: nil
+    )
+    return try await OcaCoordinator(
+      connectionBroker: broker,
+      deviceSchema: deviceSchema,
+      deviceDelegate: device
+    )
+  }
+
+  static func _gainSchema(_ properties: String) -> String {
+    """
+    device:
+      name: Test
+      profiles:
+        - TestProfile:
+          - Gain:
+              class-id: \(SwiftOCADevice.OcaGain.classID)
+              class-version: \(SwiftOCADevice.OcaGain.classVersion)
+              match: 0x00000200/0x00000000
+    \(properties)
+    """
+  }
+
+  static func _expectRejected(_ deviceSchema: OcaDeviceSchema, mentioning words: [String]) async {
+    await #expect {
+      _ = try await _makeCoordinator(deviceSchema)
+    } throws: { error in
+      guard case let OcaCoordinatorError.schemaParseError(message) = error else { return false }
+      return words.allSatisfy { message.contains($0) }
+    }
+  }
+
+  @Test
+  func knownPropertyIDsAccepted() async throws {
+    let yaml = Self._gainSchema("""
+              include-props: ["4.1", "2.3"]
+              exclude-props: ["1.6"]
+              property-defaults:
+                "4.1": { value: -6 }
+    """)
+    _ = try await Self._makeCoordinator(_parseYAML(yaml))
+  }
+
+  @Test(arguments: ["include-props", "exclude-props"])
+  func unknownPropertyIDRejected(key: String) async throws {
+    let yaml = Self._gainSchema("""
+              \(key): ["4.1", "4.99"]
+    """)
+    await Self._expectRejected(try _parseYAML(yaml), mentioning: [key, "4.99"])
+  }
+
+  @Test
+  func unknownPropertyDefaultRejected() async throws {
+    let yaml = Self._gainSchema("""
+              property-defaults:
+                "5.1": { value: 1 }
+    """)
+    await Self._expectRejected(try _parseYAML(yaml), mentioning: ["property-defaults", "5.1"])
+  }
+
+  @Test
+  func unknownDeviceManagerPropertyRejected() async throws {
+    let yaml = """
+    device:
+      name: Test
+      profiles:
+        - TestProfile:
+            device-manager-props: ["3.99"]
+            blocks:
+              - Gain:
+                  class-id: \(SwiftOCADevice.OcaGain.classID)
+                  match: 0x00000200/0x00000000
+    """
+    await Self._expectRejected(try _parseYAML(yaml), mentioning: ["device-manager-props", "3.99"])
+  }
+
+  /// A schema built in code is checked as one parsed from YAML is.
+  @Test
+  func unknownPropertyInCodeRejected() async throws {
+    let gain = OcaProfileObjectSchema(
+      role: "Gain",
+      type: SwiftOCADevice.OcaGain.self,
+      remoteObjectNumber: OcaONoMask(oNo: 0x200, mask: 0),
+      excludeProperties: [OcaPropertyID("4.99")]
+    )
+    let deviceSchema = OcaDeviceSchema(
+      name: "Test",
+      profileSchemas: [OcaProfileSchema(name: "TestProfile", blocks: [gain])]
+    )
+    await Self._expectRejected(deviceSchema, mentioning: ["exclude-props", "4.99"])
   }
 }

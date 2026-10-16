@@ -16,7 +16,7 @@
 
 import Foundation
 import SwiftOCA
-import SwiftOCADevice
+@_spi(SwiftOCAPrivate) import SwiftOCADevice
 
 /// Describes a property whose payload contains object references that must be remapped between
 /// local profile-space ONos and remote device-space ONos.
@@ -292,6 +292,47 @@ public struct OcaProfileObjectSchema: Sendable, CustomStringConvertible {
   }
 }
 
+extension SwiftOCADevice.OcaRoot {
+  /// OcaRoot's properties, which OcaRoot answers for itself rather than through device
+  /// properties, so they have no descriptors (as SwiftOCADevice's class manager has it).
+  private nonisolated static let _rootPropertyIDs: Set<OcaPropertyID> = Set(
+    (1...6).map { OcaPropertyID("1.\($0)") }
+  )
+
+  /// Every property ID of this object's class, both components of a vector property
+  /// included.
+  var _propertyIDs: Set<OcaPropertyID> {
+    Self._rootPropertyIDs.union(
+      devicePropertyDescriptors.flatMap { [$0.propertyID] + ($0.yPropertyID.map { [$0] } ?? []) }
+    )
+  }
+
+  /// Throw if any of the property IDs a schema names under `key` is not one of this
+  /// object's class.
+  func _checkPropertyIDs(_ propertyIDs: Set<OcaPropertyID>, key: String, of name: String) throws {
+    let unknown = propertyIDs.subtracting(_propertyIDs)
+    guard unknown.isEmpty else {
+      throw OcaCoordinatorError.schemaParseError(
+        "'\(name)' \(key) names properties \(type(of: self)) does not have: "
+          + unknown.sorted().map(\.description).joined(separator: ", ")
+      )
+    }
+  }
+}
+
+extension OcaProfileObjectSchema {
+  /// Throw if the schema names a property the object's class does not have, which
+  /// would otherwise never be forwarded, remapped or defaulted.
+  @OcaDevice
+  func validatePropertyIDs() async throws {
+    let object = try await createLocalObject(deviceDelegate: nil)
+    try object._checkPropertyIDs(includeProperties ?? [], key: "include-props", of: role)
+    try object._checkPropertyIDs(excludeProperties, key: "exclude-props", of: role)
+    try object._checkPropertyIDs(Set(referenceProperties.keys), key: "reference-props", of: role)
+    try object._checkPropertyIDs(Set(propertyDefaults.keys), key: "property-defaults", of: role)
+  }
+}
+
 /// Remapping of object numbers within a serialized parameter dataset, between
 /// the profile-local and device-remote object number spaces.
 ///
@@ -422,6 +463,22 @@ public final class OcaProfileSchema: Sendable, CustomStringConvertible {
       }
     }
     return result
+  }
+
+  /// Throw if the schema names a property its object's class does not have, or a device
+  /// manager property `deviceManager` does not have.
+  @OcaDevice
+  func validatePropertyIDs(deviceManager: SwiftOCADevice.OcaRoot) async throws {
+    try deviceManager._checkPropertyIDs(
+      deviceManagerProperties,
+      key: "device-manager-props",
+      of: name
+    )
+    for block in blocks {
+      try await block.applyRecursive { objectSchema, _, _ in
+        try await objectSchema.validatePropertyIDs()
+      }
+    }
   }
 
   /// The object number mask used for profile-local objects, if the schema

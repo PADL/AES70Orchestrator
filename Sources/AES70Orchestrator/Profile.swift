@@ -47,7 +47,15 @@ extension SwiftOCADevice.OcaBlock: _OcaBlockContainer {
 @OcaDeviceClass
 public final class OcaProfile: SwiftOCADevice.OcaAgent {
   private nonisolated static let _actionObjectsPropertyID = OcaPropertyID("3.2")
-  private nonisolated static let _ownerPropertyID = OcaPropertyID("2.4")
+
+  /// The ID of the property that holds an object's owner, which differs between classes,
+  /// or nil for a class without one. An object without a schema is taken to be a block.
+  private nonisolated static func _ownerPropertyID(
+    for schema: OcaProfileObjectSchema?
+  ) -> OcaPropertyID? {
+    let type = schema?.type ?? SwiftOCADevice.OcaBlock<SwiftOCADevice.OcaRoot>.self
+    return (type as? any SwiftOCADevice.OcaOwnable.Type)?.ownerPropertyID
+  }
 
   /// Sentinel used in serialized state to stand in for the (instance-specific)
   /// proxy block object number. Must be a value that is never a legitimate ONo —
@@ -592,7 +600,7 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
           toMasked: toMasked
         )
       }
-    } else if propertyID != Self._ownerPropertyID,
+    } else if propertyID != Self._ownerPropertyID(for: schema),
               schema?.referenceProperty(for: propertyID) == nil
     {
       return value
@@ -631,7 +639,7 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
     for (key, value) in result {
       guard let propertyID = try? OcaPropertyID(unsafeString: key),
             propertyID == Self._actionObjectsPropertyID
-            || propertyID == Self._ownerPropertyID
+            || propertyID == Self._ownerPropertyID(for: schema)
             || schema?.referenceProperty(for: propertyID) != nil
       else {
         continue
@@ -655,7 +663,7 @@ public final class OcaProfile: SwiftOCADevice.OcaAgent {
   /// profile: it is set when the block is added and isn't part of its state. Left
   /// in, it would be remapped on restore whenever it equals a local mask's base.
   private static func _removingOwner(_ jsonObject: [String: any Sendable]) -> [String: any Sendable] {
-    jsonObject.filter { key, _ in (try? OcaPropertyID(unsafeString: key)) != _ownerPropertyID }
+    jsonObject.filter { key, _ in (try? OcaPropertyID(unsafeString: key)) != _ownerPropertyID(for: nil) }
   }
 
   func serializeState() async throws -> [String: any Sendable] {
